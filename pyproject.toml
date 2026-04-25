@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrs-ana"
+version = "0.1.0"
+description = "Tools for X-ray Raman scattering analysis."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "h5py",
+    "matplotlib",
+    "numpy",
+    "scipy",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xrsana*"]
+
+[tool.setuptools.package-data]
+xrsana = ["resources/data/*.dat"]
+
+[tool.pytest.ini_options]
+testpaths = ["xrsana"]
+python_files = ["test*.py", "*_test.py"]
