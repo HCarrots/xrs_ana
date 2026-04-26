@@ -3188,8 +3188,10 @@ def taupgen(e, hkl = [6,6,0], crystals = 'Si', R = 1.0, dev = np.arange(-50.0,15
         print( ' I will only  calculate for the following energy: ' + '%.4f' % chi[0,0] + ' keV!!!')
     else:
         if e < np.min(chi[:,0]) or e > np.max(chi[:,0]):
-            print( 'Energy outside of the range in ' + filestring)
-            return
+            raise ValueError(
+                "Energy %.6g keV is outside of the range %.6g-%.6g keV in %s"
+                % (e, np.min(chi[:,0]), np.max(chi[:,0]), filestring)
+            )
 
         chi0r = np.interp(e,chi[:,0],chi[:,1])
         chi0i = np.interp(e,chi[:,0],chi[:,2])
@@ -3932,7 +3934,6 @@ but : was not found
 """)
     filename, groupname = dataadress[:pos], dataadress[pos+1:]
     return filename, groupname
-
 
 
 

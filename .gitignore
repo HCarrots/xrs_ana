@@ -42,3 +42,6 @@ Thumbs.db
 *.tmp
 *.bak
 *.swp
+
+# Ignore specific files
+ex_space/
