@@ -33,27 +33,22 @@ __contact__ = "christoph.sahle@esrf.fr"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 
-from . import xrs_utilities
-import numpy as np
-import math
-import shelve
+import argparse
+import ast
 import os
-import pylab
+import shelve
+
 import h5py
-
-
-from scipy import interpolate, signal, integrate, constants, optimize
-from re import findall
-# from pylab import *
+import numpy as np
 import pylab
-from optparse import OptionParser
 
-__metaclass__ = type # new style classes
+from . import xrs_utilities
+from scipy import constants, optimize
 
 installation_dir = os.path.dirname(os.path.abspath(__file__))
 
 def cla():
-        pass
+    pylab.cla()
 
 class detector:
     """
@@ -394,7 +389,6 @@ class sample:
         mu_tot_in, mu_tot_out = self.get_murho(energy1,energy2)
 
         if isinstance(tth,list):
-            self.shape == 'sphere' # list of tth only for sphere geometry
             ac = (mu_tot_in + mu_tot_out)/(1.0 - np.exp(-mu_tot_in*thickness -mu_tot_out*thickness))
 
         else:
@@ -404,16 +398,14 @@ class sample:
                         test_tth = alpha-beta
                     else: # reflection geometry
                         test_tth = 180.0 - (alpha+beta)
-                    if tth == test_tth:
-                        pass
-                    else:
+                    if tth != test_tth:
                         print( 'the alpha and beta values set are not congruent to the tth value set!')
-                absorption_correction_factor = xrs_utilities.abscorr2(mu_tot_in,mu_tot_out,alpha,beta,thickness)
+                ac = xrs_utilities.abscorr2(mu_tot_in,mu_tot_out,alpha,beta,thickness)
             elif self.shape == 'sphere':
                 ac = (mu_tot_in + mu_tot_out)/(1.0 - np.exp(-mu_tot_in*thickness -mu_tot_out*thickness)) 
                 #1.0/np.exp(-thickness*mu_tot_in -thickness*mu_tot_out) # spherical sample just add up in and outgoing absorption
             else:
-                print( 'please provide either shape=\'sphere\' (default) or \'slab\' and alpha and beta!')
+                raise ValueError('please provide either shape=\'sphere\' (default) or \'slab\' and alpha and beta')
         return ac
 
     def plot_inv_absorption(self,energy1,energy2,range_of_thickness = np.arange(0.0,0.5,0.01)):
@@ -683,12 +675,6 @@ class absolute_cross_section:
         data[:,0] = self.eloss
         data[:,1::] = self.absolute_counts
         h5_group["abs_counts"] = data
-        #
-        # for attr in ['eloss', 'J', 'C', 'V', 'q', 'thomson', 'I0', 'beam_h', 'beam_v', 'sample_tth',
-        #                 'sample_densities', 'sample_molar_masses', 'sample_formulas', 'sample_thickness',
-        #                 'sample_concentrations', 'sample_abs_in', 'det_efficiency', 'ana_efficiency',
-        #                 'ana_solid_angle', 'ana_energy_resolution', 'energy_in_keV' ]:
-        #     h5_group[attr] = eval( 'self.' + attr )
         f.flush()
         f.close()      
 
@@ -699,11 +685,10 @@ def input_file_parser(filename):
     e.g. 'hkl = [6,6,0]' instead of 'hkl = [6, 6, 0]')
     """
     try:
-        lines = open(filename,'r').readlines()
-        #f = open(filename,'r')
-    except IOError:
-        print( 'No input file ' + filename + ' found.')
-        return
+        with open(filename, 'r') as handle:
+            lines = handle.readlines()
+    except OSError as exc:
+        raise FileNotFoundError('No input file ' + filename + ' found.') from exc
     input_parameters = {} # dictionary of input parameters
     section_names = ['detector','analyzer','sample','thomson','beam','compton_profiles']
     for name in section_names:
@@ -711,19 +696,72 @@ def input_file_parser(filename):
     # parse all given parameters
     lineindex = 0
     while lineindex < len(lines):
-        line = lines[lineindex]
-        if line[0:4] == '####':
-            thekey = line.split()[1]
+        line = lines[lineindex].strip()
+        if line.startswith('####'):
+            parts = line.split()
+            if len(parts) < 2:
+                lineindex += 1
+                continue
+            thekey = parts[1]
+            if thekey not in input_parameters:
+                input_parameters[thekey] = {}
             lineindex += 1
-            while lines[lineindex][0:4] != '####' and lineindex < len(lines):
-                if not lines[lineindex] == '\n':
-                    input_parameters[thekey][lines[lineindex].split()[0]] = eval(lines[lineindex].split()[2])
-                    lineindex += 1
-                else:
-                    lineindex += 1
-                if lineindex == len(lines):
-                    break
+            while lineindex < len(lines) and not lines[lineindex].lstrip().startswith('####'):
+                item = lines[lineindex].strip()
+                if item and not item.startswith('#'):
+                    key, value = _parse_input_assignment(item)
+                    input_parameters[thekey][key] = value
+                lineindex += 1
+            continue
+        lineindex += 1
     return input_parameters, section_names
+
+
+def _parse_input_assignment(line):
+    if '=' not in line:
+        raise ValueError("Expected input assignment in the form 'name = value': %s" % line)
+    key, value = [part.strip() for part in line.split('=', 1)]
+    try:
+        return key, ast.literal_eval(value)
+    except (SyntaxError, ValueError):
+        return key, _parse_numpy_expression(value)
+
+
+def _parse_numpy_expression(value):
+    tree = ast.parse(value, mode='eval')
+    allowed_calls = {
+        ('np', 'arange'): np.arange,
+        ('numpy', 'arange'): np.arange,
+        ('np', 'linspace'): np.linspace,
+        ('numpy', 'linspace'): np.linspace,
+        ('np', 'logspace'): np.logspace,
+        ('numpy', 'logspace'): np.logspace,
+        ('np', 'array'): np.array,
+        ('numpy', 'array'): np.array,
+    }
+
+    def convert(node):
+        if isinstance(node, ast.Expression):
+            return convert(node.body)
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = convert(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.List):
+            return [convert(item) for item in node.elts]
+        if isinstance(node, ast.Tuple):
+            return tuple(convert(item) for item in node.elts)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            call_key = (node.func.value.id, node.func.attr)
+            if call_key not in allowed_calls:
+                raise ValueError("Unsupported expression in prediction input: %s" % value)
+            args = [convert(arg) for arg in node.args]
+            kwargs = {keyword.arg: convert(keyword.value) for keyword in node.keywords}
+            return allowed_calls[call_key](*args, **kwargs)
+        raise ValueError("Unsupported expression in prediction input: %s" % value)
+
+    return convert(tree)
 
 def get_all_input(filename = 'prediction.inp'):
     """
@@ -808,141 +846,20 @@ def run(filename='prediction.inp', output_txt=None):
     return abs_cross_section_obj
 
 
-import sys
-if(sys.argv[0][-12:]!="sphinx-build"):
+def build_arg_parser():
+    parser = argparse.ArgumentParser(description='Create an XRS spectrum prediction.')
+    parser.add_argument('-f', '--file', dest='filename', default='prediction.inp', help='read input from FILE')
+    parser.add_argument('-o', '--output-txt', dest='output_txt', default=None, help='save calculated prediction to FILE')
+    return parser
 
-    # parse input arguments, i.e. input file
-    parser = OptionParser()
-    parser.add_option("-f", "--file", dest="filename", default="prediction.inp", help="read input from FILE", metavar="FILE")
-    parser.add_option("-o", "--output-txt", dest="output_txt", default=None, help="save calculated prediction to FILE", metavar="FILE")
-    (options, args) = parser.parse_args()
 
+def main(argv=None):
+    options = build_arg_parser().parse_args(argv)
+    return run(options.filename, options.output_txt)
 
 
 if __name__ == '__main__':
-    run(options.filename, options.output_txt)
-
-
-def main():
-    run(options.filename, options.output_txt)
-
-#######################################################
-# plot q vs. matrix elements
-#######################################################
-
-class radial_wave_function:
-        def __init__(self):
-            self.element = None
-            self.Z       = None
-            self.n       = None
-            self.l       = None
-            self.s       = None
-            self.hydrogen_like  = False
-            self.spin_polarized = False
-            self.R_nl_numeric   = np.array([])
-            self.r              = np.array([])
-
-        def load_from_sympy( self, Z, n, l ):
-            try:
-                import importlib
-                hydrogen = importlib.import_module('sympy.physics.hydrogen')
-                R_nl = hydrogen.R_nl
-                sympy = importlib.import_module('sympy')
-                var = sympy.var
-            except ImportError:
-                print('Did not find sympy module, will end here.')
-                return
-            rr, ZZ = var("rr ZZ")
-            R_nl_function = R_nl(n, l, rr, ZZ)
-            r = np.logspace(1e-6, 2., 1000)-1.0
-            R_nl_numeric = np.zeros_like(r)
-            for ii in range(r.shape[0]):
-                R_nl_numeric[ii] = R_nl(n, l, rr, ZZ).evalf(subs={rr: r[ii] , ZZ:Z})
-            self.r = r
-            self.R_nl_numeric = R_nl_numeric
-            self.n = n
-            self.l = l
-            self.Z = Z
-            self.element = xrs_utilities.element(Z)
-            self.hydrogen_like  = True
-            self.spin_polarized = False
-
-        def load_from_PP( self, Z, n, l, path='/home/christoph/programs/atomic_wavefunctions/',
-                            spin_polarized=False ):
-            l_str = ['s', 'p', 'd', 'f', 'g', 'h'][l]
-            fname_up = path + xrs_utilities.element(Z).lower() + '/' + 'ae/wf-'+str(n)+l_str+'_up'
-            fname_dn = path + xrs_utilities.element(Z).lower() + '/' + 'ae/wf-'+str(n)+l_str+'_dn'
-            # wfcn in form u(r) = R(r)/r
-            # for checking norm: calculate dr r^2 u(r) u*(r)
-            raw_up = np.loadtxt(fname_up)
-            raw_dn = np.loadtxt(fname_dn)
-
-class matrix_element:
-    def __init__( self, R1, R2 ):
-        self.wfn1 = R1.R_nl_numeric
-        self.wfn2 = R2.R_nl_numeric
-        self.k    = np.array([])
-        self.r    = np.linspace(0.0, 15.0, 1000)
-        self.Mel  = np.array([])
-        self.q    = np.array([])
-
-    def compute( self, k ):
-        """ **compute**
-        Calculates the matrix elements for a given k or range of k.
-        """
-        all_k = []
-        if not isinstance(k,list):
-            all_k.append(k)
-        else:
-            all_k = k
-        self.k   = np.array(all_k)
-        self.q   = np.zeros_like(self.r)
-        self.Mel = np.zeros((len(self.r),len(k)))
-        for ii in range(len(k)):
-            self.q, self.Mel[:,ii] = xrs_utilities.compute_matrix_elements( self.wfn1, self.wfn2, all_k[ii], self.r )
-
-    def write_H5( self, filename ):
-        """ **write_H5**
-        Creates an HDF5 file to store the matrix elements.
-
-        Args:
-          * fname (str) : Full path and filename for the HDF5 file to be created.
-        """
-        if np.any(self.q):
-            # check if file already exists
-            if os.path.isfile( filename ):
-                os.remove( filename )
-            f = h5py.File( filename, "w" )
-            f.require_group( "matrix_elements" )
-            f["matrix_elements"]["r"] = self.r
-            f["matrix_elements"]["q"] = self.q
-            f["matrix_elements"]["M"] = self.Mel
-            f.close()
-        else:
-            print('There are no matrix elements to save.')
-
-    def write_ascii( self, filename ):
-        """ **write_ascii**
-        Creates an ascii-file and writes matrix elements.
-
-        Args:
-          * fname (str) : Full path and filename for the ascii file to be created.
-        """
-        if np.any(self.q):
-            # check if file already exists
-            if os.path.isfile( filename ):
-                os.remove( filename )
-            the_data = np.zeros((len(self.q), len(self.k)+1))
-            the_data[:,0] = self.q
-            for ii in range(len(self.k)):
-                the_data[:,ii+1] = self.Mel[:,ii]
-
-            np.savetxt( filename, the_data )
-
-
-
-
-
+    main()
 
 
 

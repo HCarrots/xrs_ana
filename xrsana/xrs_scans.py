@@ -146,7 +146,9 @@ class Scan:
             h5_md[mn] = mv
             
         for attr in ['edfmats', 'scan_number', 'energy', 'monitor', 'scan_type','signals','errors']:
-            f[attr] = eval( 'self.' + attr )
+            if attr in f:
+                del f[attr]
+            f[attr] = getattr(self, attr)
             
         for key in self.used_masks.keys():
             hgroup = f.require_group(key)
@@ -169,19 +171,28 @@ class Scan:
         else:
             f = h5py.File(fname, "r")
 
-        for attr in ['edfmats', 'scan_number', 'energy', 'monitor', 'counters', 'motors', 'scan_type']:
-           eval( 'self.' + attr +' = f[attr]')
+        for attr in ['edfmats', 'scan_number', 'energy', 'monitor', 'scan_type']:
+            if attr in f:
+                value = f[attr][()]
+                if isinstance(value, bytes):
+                    value = value.decode()
+                setattr(self, attr, value)
+
+        if "counters" in f:
+            self.counters = {key: f["counters"][key][()] for key in f["counters"]}
+        if "motorDict" in f:
+            self.motors = {key: f["motorDict"][key][()] for key in f["motorDict"]}
 
         self.used_masks = {}
         for key in f:
-            print(" has key ", key)
             if str(key)[:3] == "ROI" :
                 mygroup = f[key]
                 self.used_masks[key] = [mygroup["mask_pos"][:].tolist(),  np.array(mygroup["mask"][:])] 
 
 
            
-        f.close()
+        if not isinstance(fname, h5py.Group):
+            f.close()
 
         
 
@@ -955,7 +966,7 @@ class scan:
                     try: 
                         FWHM,x0 = xrs_utilities.fwhm((self.energy - oneroi_cenom[roiind][pixelind])*1e3,self.signals_pw[roiind][:,pixelind])
                         oneroi_resolution.append(FWHM)
-                    except:
+                    except (ValueError, FloatingPointError):
                         oneroi_resolution.append(0.0)
                 cenom_pw.append(oneroi_cenom)
                 resolution_pw.append(oneroi_resolution)
@@ -1113,7 +1124,7 @@ class offDiaDataSet:
                 guess = [x[np.where(y == np.amax(y))[0]][0], 0.01, 1.0, np.amax(y), 1.]
                 popt, pcov = optimize.curve_fit(math_functions.pearson7_forcurvefit, x, y,p0=guess) 
                 RCposition.append(popt[0])
-            except: 
+            except (RuntimeError, ValueError):
                 RCposition.append(xrs_utilities.find_center_of_mass(x,y))
             RCmax.append(np.amax(y))
 
@@ -1153,11 +1164,6 @@ class offDiaDataSet:
         for ii in range(len(self.RCmonitor)):
             x = self.motorMatrix[ii,:]
             y = self.RCmonitor[ii,:]
-            #try:
-            #    guess = [x[np.where(y == np.amax(y))[0]][0], 0.01, 1.0, np.amax(y), 1.]
-            #    popt, pcov = optimize.curve_fit(math_functions.pearson7_forcurvefit, x, y,p0=guess) 
-            #    RCposition.append(popt[0])
-            #except: 
             RCposition.append(xrs_utilities.find_center_of_mass(x,y))
 
         # possibly correct for deviations from Bragg's law
@@ -1495,7 +1501,7 @@ def make_scan_group_pixel( group_of_scans, group_type=None, abs_counts=False ):
 
     # create the arrays/dicts for energy, signals, and errors
     energy   = group_of_scans[0].energy
-    monitors = np.zeros(np.shape(groupofscans[0].monitor))
+    monitors = np.zeros(np.shape(group_of_scans[0].monitor))
     raw_signals = {}
     raw_errors  = {}
     for key in group_of_scans[0].raw_signals:
@@ -1546,6 +1552,28 @@ def append2Scan_right(group1,group2,inds=None,grouptype='spectrum'):
         signals = np.append(signals,np.squeeze(group2.signals[inds,:]),0)
         errors  = np.append(errors,np.squeeze(group2.errors[inds,:]),0)
         return scangroup(energy,signals,errors,grouptype=gtype)
+
+def append2Scan_right_pixel(group1,group2,inds=None,grouptype='spectrum'):
+    """
+    append two instancees of the Scan_group class, return instance of Scan_group
+    append group2[inds] to the right (higher energies) of group1
+    if inds is not None, only append rows indicated by inds to the first group 
+    """
+    energy = np.append(group1.energy, group2.energy if inds is None else group2.energy[inds])
+    raw_signals = {}
+    raw_errors  = {}
+    for key in group1.raw_signals:
+        if inds is None:
+            raw_signals[key] = np.append(group1.raw_signals[key], group2.raw_signals[key], axis=0)
+            raw_errors[key]  = np.append(group1.raw_errors[key],  group2.raw_errors[key],  axis=0)
+        else:
+            raw_signals[key] = np.append(group1.raw_signals[key], group2.raw_signals[key][inds], axis=0)
+            raw_errors[key]  = np.append(group1.raw_errors[key],  group2.raw_errors[key][inds],  axis=0)
+
+    group = Scan_group(energy, np.array([]), np.array([]), group_type=grouptype if grouptype is not None else group1.grouptype)
+    group.raw_signals = raw_signals
+    group.raw_errors  = raw_errors
+    return group
 
 
 
@@ -1689,9 +1717,57 @@ def catScans_pixel( groups, include_elastic ):
     # cut off the elastic line if present in the groups
     if 'elastic' in groups and not include_elastic:
         inds = np.where(spectrum.energy > groups['elastic'].get_eend())[0]
-        return spectrum.energy[inds], spectrum.signals[inds,:], spectrum.errors[inds,:]
+        raw_signals = {}
+        raw_errors  = {}
+        for key in spectrum.raw_signals:
+            raw_signals[key] = spectrum.raw_signals[key][inds]
+            raw_errors[key]  = spectrum.raw_errors[key][inds]
+        return spectrum.energy[inds], raw_signals, raw_errors
     else:
-        return spectrum.energy, spectrum.signals, spectrum.errors
+        return spectrum.energy, spectrum.raw_signals, spectrum.raw_errors
+
+
+def catScansLong_pixel(groups, include_elastic):
+    """
+    Stitch together all scans in groups in a pixel-by-pixel fashion
+    with a long scan used as the base spectrum.
+    """
+    # the long scan
+    spectrum = groups['long']
+
+    # groups that don't have 'long' in the grouptype
+    all_groups  = []
+    for group in groups:
+        if not 'long' in group:
+            all_groups.append(groups[group])
+    all_groups.sort(key = lambda x:x.get_estart())
+
+    # groups that have 'long' in the grouptype  
+    long_groups = []
+    for group in groups:
+        if 'long' in group and group != 'long':
+            long_groups.append(groups[group])
+    long_groups.sort(key = lambda x:x.get_estart())
+
+    # insert other long scans first into the long scan
+    for group in long_groups:
+        spectrum = append2Scan_right_pixel(spectrum, group)
+
+    # insert other scans into the long scan
+    for group in all_groups:
+        spectrum = append2Scan_right_pixel(spectrum, group)
+
+    # cut off the elastic line if present in the groups
+    if 'elastic' in groups and not include_elastic:
+        inds = np.where(spectrum.energy > groups['elastic'].get_eend())[0]
+        raw_signals = {}
+        raw_errors  = {}
+        for key in spectrum.raw_signals:
+            raw_signals[key] = spectrum.raw_signals[key][inds]
+            raw_errors[key]  = spectrum.raw_errors[key][inds]
+        return spectrum.energy[inds], raw_signals, raw_errors
+    else:
+        return spectrum.energy, spectrum.raw_signals, spectrum.raw_errors
 
 
 def appendScans(groups,include_elastic):

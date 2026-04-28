@@ -33,35 +33,32 @@ def readbiggsdata(filename,element):
     bindingid = '#UBIND'
     colnameid = '#L'
     data = []
-    f = open(filename,'r')
-    istrue = True
-    while istrue:
-        line = f.readline()
-        if line[0:2] == elementid:
-            if line.split()[-1] == element:
-                line = f.readline()
-                while line[0:2] != elementid:
-                    if line[0:2] == sizeid:
-                        arraysize = int(line.split()[-1])
-                        line = f.readline()
-                    if line[0:7] == occid:
-                        occupation = line.split()[1:]
-                        line = f.readline()
-                    if line[0:6] == bindingid:
-                        bindingen = line.split()[1:]    
-                        line = f.readline()
-                    if line[0:2] == colnameid:
-                        colnames = line.split()[1:]
-                        line = f.readline()
-                    if line[0]== ' ':
-                        data.append([float(n) for n in line.strip().split()])
-                        #data = np.zeros((31,arraysize))
-                        line = f.readline()
+    arraysize = occupation = bindingen = colnames = None
+    with open(filename, 'r') as handle:
+        while True:
+            line = handle.readline()
+            if line == '':
                 break
+            if line.startswith(elementid) and line.split()[-1] == element:
+                line = handle.readline()
+                while line and not line.startswith(elementid):
+                    if line.startswith(sizeid):
+                        arraysize = int(line.split()[-1])
+                    elif line.startswith(occid):
+                        occupation = line.split()[1:]
+                    elif line.startswith(bindingid):
+                        bindingen = line.split()[1:]
+                    elif line.startswith(colnameid):
+                        colnames = line.split()[1:]
+                    elif line.startswith(' '):
+                        data.append([float(n) for n in line.strip().split()])
+                    line = handle.readline()
+                break
+    if arraysize is None or occupation is None or bindingen is None or colnames is None or not data:
+        raise ValueError("No Biggs data for element %r in %s" % (element, filename))
     length = len(data)
-    data = (np.reshape(np.array(data),(length,arraysize)))
+    data = np.reshape(np.array(data),(length,arraysize))
     return data, occupation, bindingen, colnames
-
 
 
 

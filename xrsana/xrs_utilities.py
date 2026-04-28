@@ -43,7 +43,6 @@ import copy
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
-import traceback
 import sys
 
 from matplotlib.widgets import Cursor
@@ -140,8 +139,8 @@ def tauphoto(Z, energy, logtablefile=os.path.join(data_installation_dir,'logtabl
         Z = element(Z)
     try:
         ind = list(logtable[:,0]).index(Z)
-    except:
-        print( 'no such element in logtable.dat')
+    except ValueError as exc:
+        raise ValueError('no such element in logtable.dat: %s' % Z) from exc
 
     c = np.array(logtable[ind:ind+5,:]) # 5 lines that corresponds to the element
     tau_i = np.zeros((4, len(en)))
@@ -179,8 +178,8 @@ def sigmainc(Z, energy, logtablefile=os.path.join(data_installation_dir,'logtabl
         Z = element(Z)
     try:
         ind = list(logtable[:,0]).index(Z)
-    except:
-        print( 'no such element in logtable.dat')
+    except ValueError as exc:
+        raise ValueError('no such element in logtable.dat: %s' % Z) from exc
 
     c = np.array(logtable[ind:ind+5,:]) # 5 lines that corresponds to the element
     sigmai=0
@@ -678,7 +677,7 @@ def dtxrd_anomalous_absorption( energy, hkl, alpha=0.0, crystal='Si', angular_ra
     return theta, mus
 """
 def dtxrd_extinction_length( energy, hkl, alpha=0.0, crystal='Si' ):
-    pass
+    raise NotImplementedError("dtxrd_extinction_length is not implemented.")
 
 def delE_dicedAnalyzerIntrinsic(E, Dw, Theta):
     """Calculates the intrinsic energy resolution of a diced crystal
@@ -856,10 +855,10 @@ def lindhard_pol(q,w,rs=3.93,use_corr=False, lifetime=0.28):
         fekq=np.zeros(np.shape(ekq)) 
         fekq[ekq<=ef] = 1.0
     if use_corr:
-        print('Not implemented yet!')
+        raise NotImplementedError("Correlation correction is not implemented.")
     x = np.zeros_like(w, dtype='complex')
     for ii in range(len(w)):
-        y=np.sin(TH)*(fek-fekq)/(w[ii]+ek-ekq+np.complex(0,1)*gammal)
+        y=np.sin(TH)*(fek-fekq)/(w[ii]+ek-ekq+complex(0,1)*gammal)
         y=np.trapezoid( y, th, axis=0 )
         y=np.trapezoid( k**2.0*y, k, axis=0 )
         x[ii]=y
@@ -1850,88 +1849,6 @@ def cixs_terzo(tthv,tthh,psi,anal_braggd=86.5):
     qh = kh-kprime
     return q0, qh
 
-# def constrained_nnmf(A,W_ini,H_ini,W_up,H_up,max_iter=10000,verbose=False):
-#     """ **constrained_nnmf**
-#     Approximate non-negative matrix factorization with constrains.
-    
-#     function [W H]=johannes_nnmf_ALS(A,W_ini,H_ini,W_up,H_up)
-#     % *****************************************************************
-#     % *****************************************************************
-#     % ** [W H]=johannes_nnmf(A,W_ini,H_ini,W_up,H_up)   **
-#     % ** performs A=WH approximate matrix factorization,             **
-#     % ** where A(n*m), W(n*k), and H(k*m) are non-negative matrices, **
-#     % ** and k<min(n,m). Masking arrays W_up(n*k), H_up(k*m) = 0,1   **
-#     % ** control elements of W and H to be updated (1) or not (0).   **
-#     % ** This fact can be used to set constraints.                   **
-#     % **                                                             **
-#     % **         Johannes Niskanen 13.10.2015                        **
-#     % **                                                             **
-#     % *****************************************************************
-#     % *****************************************************************
-#     by Johannes Niskanen
-#     """
-#     # initialize matrices
-#     H = H_ini
-#     W = W_ini
-    
-#     # initial cost
-#     J = np.sum(np.sum(0.5 * (A-np.dot(W,H))*(A-np.dot(W,H))))
-#     print('Initial cost J = %1.4f at step 0'%J)
-#     dJ = -0.1
-
-#     sind = 0
-#     while sind <= max_iter:
-#         sind += 1
-#         # check singularity
-#         if np.isnan(np.linalg.det(np.dot(H,H.T))) or np.abs( np.linalg.det(np.dot(H,H.T))) < 1.0e-12:
-#             print('H is singular, will break here.')
-#             return
-
-#         # solve W from (H*H')*W'=H*A'
-#         W = np.linalg.lstsq( np.dot(H,H.T),np.dot(H,A.T) )[0].T
-
-#         # make W nonnegative
-#         inds = W < 0.0
-#         W[inds] = 0.0
-
-#         # restore fixed components
-#         inds = W_up==0.0
-#         W[inds] = W_ini[inds]
-
-#         # check singularity
-#         if np.isnan( np.linalg.det(np.dot(W.T,W)) ) or np.abs( np.linalg.det(np.dot(W.T,W)) ) < 1.0e-12:
-#             W = np.zeros(np.shape(W))
-#             H = np.zeros(np.shape(H))
-#             return
-
-#         # solve H from: (W'*W)*H=W'*A
-#         H = np.linalg.lstsq( np.dot(W.T,W),np.dot(W.T,A) )[0]
-
-#         # make H non-negative
-#         inds = H < 0.0
-#         H[inds] = 0.0
-
-#         # restore fixed components
-#         inds = H_up == 0.0
-#         H[inds] = H_ini[inds]
-
-#         # formalize spectra and coefficients
-#         W = W/(np.dot(np.ones((np.shape(W)[0],1)),np.sum(W,axis=0).reshape(1,len(np.sum(W,axis=0))) ))
-#         H = H/(np.dot(np.ones((np.shape(H)[0],1)),np.sum(H,axis=0).reshape(1,len(np.sum(H,axis=0))) ))
-
-#         # print some progression
-#         if sind % 100 == 0 and verbose:
-#             Jnew = np.sum(np.sum(0.5 * (A-np.dot(W,H))*(A-np.dot(W,H))))
-#             dJ   = Jnew-J
-#             J    = Jnew
-#             print('Iteration %1d J = %1.4f') %(sind,J)
-#             print('dJ = %5.3f') % dJ
-#             print('Fnorm = %5.3f') % np.mean(np.sum(W))
-#             print('Cnorm = %5.3f') % np.mean(np.sum(H))
-
-#     return W, H
-
-
 
 
 def mat2con(W,H,W_up,H_up):
@@ -2130,7 +2047,7 @@ def constrained_svd(M,U_ini,S_ini,VT_ini,U_up,max_iter=10000,verbose=False):
 
     # initial cost
     J = np.sum(np.sum(0.5 * (M-np.dot(np.dot(U,S),VT))*(M-np.dot(np.dot(U,S),VT))))
-    print('Initial cost J = %1.4f at step 0') % J
+    print('Initial cost J = %1.4f at step 0' % J)
     dJ = -0.1
 
     sind = 0
@@ -2165,8 +2082,8 @@ def constrained_svd(M,U_ini,S_ini,VT_ini,U_up,max_iter=10000,verbose=False):
             Jnew = np.sum(np.sum(0.5 * (M-np.dot(np.dot(U,S),VT))*(M-np.dot(np.dot(U,S),VT))))
             dJ   = Jnew-J
             J    = Jnew
-            print('Iteration %1d J = %1.4f') %(sind,J)
-            print('dJ = %5.3f') % dJ
+            print('Iteration %1d J = %1.4f' % (sind,J))
+            print('dJ = %5.3f' % dJ)
 
     return U, S, VT
 
@@ -2600,16 +2517,15 @@ def element(z):
     if isinstance(z,str):
         try:
             Z = zs.index(z)+1
-        except:
-            Z = None
-            print( 'Given element ' + z + ' unknown.')
+        except ValueError as exc:
+            raise ValueError('Given element ' + z + ' unknown.') from exc
     elif isinstance(z,int):
         if z > 0 and z < 105:
             Z = zs[z-1]
         else:
-            print( 'Element Z = '+ str(z) +' unknown.')
+            raise ValueError('Element Z = '+ str(z) +' unknown.')
     else:
-        print( 'type '+ str(type(z)) + 'not supported.'    )
+        raise TypeError('type '+ str(type(z)) + 'not supported.')
     return Z
 
 #os.path.join(data_installation_dir,'data/logtable.dat')
@@ -2639,8 +2555,8 @@ def myprho(energy,Z,logtablefile=os.path.join(data_installation_dir,'logtable.da
         Z = element(Z)
     try:
         ind = list(logtable[:,0]).index(Z)
-    except:
-        print( 'no such element in logtable.dat')
+    except ValueError as exc:
+        raise ValueError('no such element in logtable.dat: %s' % Z) from exc
     c     = np.array(logtable[ind:ind+5,:]) # 5 lines that corresponds to the element
     le    = np.log(en) # logarithm of the energy
     mr    = np.exp(c[1,3]+le*(c[2,3]+le*(c[3,3]+le*c[4,3])))  # extract mu from loglog table
@@ -3763,8 +3679,8 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     from math import factorial
 
     try:
-        window_size = np.abs(np.int(window_size))
-        order = np.abs(np.int(order))
+        window_size = abs(int(window_size))
+        order = abs(int(order))
     except ValueError :
         raise ValueError("window_size and order have to be of type int")
     if window_size % 2 != 1 or window_size < 1:
@@ -3774,8 +3690,8 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     order_range = range(order+1)
     half_window = (window_size -1) // 2
     # precompute coefficients
-    b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
-    m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
+    b = np.asarray([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
+    m = np.linalg.pinv(b)[deriv] * rate**deriv * factorial(deriv)
     # pad the signal at the extremes with
     # values taken from the signal itself
     firstvals = y[0] - np.abs( y[1:half_window+1][::-1] - y[0] )
@@ -3934,7 +3850,3 @@ but : was not found
 """)
     filename, groupname = dataadress[:pos], dataadress[pos+1:]
     return filename, groupname
-
-
-
-

@@ -81,18 +81,6 @@ def getAtomicDensity(Z):
     """
     return xrs_utilities.myprho(1.0,Z)[1]
 
-class SqwPredict:
-    """Class to build a S(q,w) prediction based on HF Compton Profiles.
-
-    Attributes:
-
-      * sampleStr (list of strings): one string per compound (e.g. ['C','SiO2'])
-      * concentrations (list of floats): relative compositional weight for each compound
-
-    """
-    pass
-    
-    
 class AtomProfile:
     """
     **AtomProfile**
@@ -389,10 +377,6 @@ class FormulaProfile:
                 self.V_total[:,ii] += np.interp(self.eloss,AP.eloss,AP.V_total[:,ii])*AP.get_stoichiometry()
                 self.q_vals[:,ii]  = np.interp(self.eloss,AP.eloss,AP.q_vals[:,ii])
  
-    def get_correctecProfiles(self, densities, alpha, beta, samthick ):
-        pass
-
-
 class HFProfile:
     """
     *HFProfile*
@@ -778,7 +762,6 @@ def HRcorrect(pzprofile,occupation,q):
             j1 = j1/q*j0
             asymmetry[:,2] = j1
     return asymmetry
-
 
 
 
