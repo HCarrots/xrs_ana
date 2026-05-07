@@ -35,8 +35,14 @@ __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 
 import argparse
 import ast
+import io
+import json
 import os
 import shelve
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+os.environ.setdefault('MPLCONFIGDIR', os.path.join('/tmp', 'xrsana-matplotlib'))
 
 import h5py
 import numpy as np
@@ -689,6 +695,10 @@ def input_file_parser(filename):
             lines = handle.readlines()
     except OSError as exc:
         raise FileNotFoundError('No input file ' + filename + ' found.') from exc
+    return _parse_input_lines(lines)
+
+
+def _parse_input_lines(lines):
     input_parameters = {} # dictionary of input parameters
     section_names = ['detector','analyzer','sample','thomson','beam','compton_profiles']
     for name in section_names:
@@ -817,6 +827,1130 @@ def get_all_input(filename = 'prediction.inp'):
             all_input[key][key2] =  input_parameters[key][key2]
     return all_input
 
+
+def _default_all_input():
+    all_input = {}
+    section_names = ['detector','analyzer','sample','thomson','beam','compton_profiles']
+    for name in section_names:
+        all_input[name] = {}
+    # detector
+    all_input['detector']['energy']    = 9.7  # analyzer energy in keV
+    all_input['detector']['thickness'] = 500.0 # detector thickness
+    all_input['detector']['material']  = 'Si'  # detector material
+    all_input['detector']['pixel_size']= [256,768] #detector pixel size
+    # analyzer
+    all_input['analyzer']['material'] = 'Si' # analyzer crystal material 
+    all_input['analyzer']['hkl']      = [6,6,0] # analyzer crystal reflection
+    all_input['analyzer']['mask_d']   = 60.0    # analyzer mask diameter in mm
+    all_input['analyzer']['bend_r']   = 1.0     # analyzer bending radius in m
+    all_input['analyzer']['energy_resolution']   = 0.5 # resolution in eV
+    all_input['analyzer']['diced']        = False    # keyword, if bent or diced analyzer is used
+    all_input['analyzer']['thickness']    = 500.0    # analyzer bending radius in m
+    all_input['analyzer']['database_dir'] = installation_dir  # directory to tabulated chi tables (for calculation of reflectivities)
+    # sample
+    all_input['sample']['chem_formulas']    = []
+    all_input['sample']['concentrations']   = []
+    all_input['sample']['densities']        = []
+    all_input['sample']['angle_tth']        = []
+    all_input['sample']['sample_thickness'] = []
+    all_input['sample']['angle_in'] = None    # up to now, only spherical samples possible !!!
+    all_input['sample']['angle_out'] = None   # same here
+    all_input['sample']['shape'] = 'sphere'    # sample shape, right now, only this works, should be 'slab' or 'sphere' in the future
+    all_input['sample']['molar_masses'] = None # this is needed for the estimation of number of scatterers. should be mandatory, acutally
+    # thomson
+    all_input['thomson']['omega_1'] = []
+    all_input['thomson']['omega_2'] = [] 
+    all_input['thomson']['tth']     = []
+    all_input['thomson']['scattering_plane'] = 'vertical' # 'vertical' or 'horizontal', for polarization purposes
+    all_input['thomson']['polarization'] = 0.99           # polarization factor
+    # beam
+    all_input['beam']['i0_intensity'] = []
+    all_input['beam']['beam_height']  = []
+    all_input['beam']['beam_width']   = []
+    all_input['beam']['divergence'] = None # this is just a dummy parameter
+    # compton_profiles
+    all_input['compton_profiles']['eloss_range'] = np.arange(0.0,1000.0,0.1) # energy range in eV
+    all_input['compton_profiles']['E0'] = 9.7 # analyzer energy in keV
+    return all_input
+
+
+def get_all_input_from_text(text):
+    input_parameters, section_names = _parse_input_lines(text.splitlines())
+    all_input = _default_all_input()
+    for key in input_parameters:
+        for key2 in input_parameters[key]:
+            all_input[key][key2] = input_parameters[key][key2]
+    return all_input
+
+
+WEB_DEFAULT_PARAMETERS = {
+    'chem_formulas': 'Si',
+    'concentrations': '1.0',
+    'densities': '2.33',
+    'molar_masses': '28.0855',
+    'angle_tth': 60.0,
+    'sample_thickness': 0.01,
+    'E0': 9.7,
+    'eloss_min': 0.0,
+    'eloss_max': 1000.0,
+    'points': 220,
+    'i0_intensity': 1.0e12,
+    'beam_height': 50.0,
+    'beam_width': 50.0,
+    'detector_energy': 9.7,
+    'detector_thickness': 500.0,
+    'detector_material': 'Si',
+    'analyzer_material': 'Si',
+    'hkl': '6,6,0',
+    'mask_d': 60.0,
+    'bend_r': 1.0,
+    'energy_resolution': 0.5,
+    'analyzer_efficiency': 0.5,
+    'use_reflectivity': False,
+    'scattering_plane': 'vertical',
+    'polarization': 0.99,
+    'output_txt': 'prediction_output.txt',
+}
+
+
+def _parse_literal_value(value):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+    if stripped[0] not in '[({"\'':
+        return value
+    try:
+        return ast.literal_eval(stripped)
+    except (SyntaxError, ValueError):
+        return value
+
+
+def _format_web_value(value):
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return repr(list(value))
+    return value
+
+
+def _number_list(value, default=None, item_type=float):
+    if value is None or value == '':
+        value = default
+    value = _parse_literal_value(value)
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [item_type(item) for item in value]
+    if isinstance(value, str):
+        items = [item.strip() for item in value.replace(';', ',').split(',')]
+        return [item_type(item) for item in items if item]
+    return [item_type(value)]
+
+
+def _string_list(value, default=None):
+    if value is None or value == '':
+        value = default
+    value = _parse_literal_value(value)
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value).replace(';', ',').split(',') if item.strip()]
+
+
+def _scalar(value, default, value_type=float):
+    if value is None or value == '':
+        return value_type(default)
+    return value_type(value)
+
+
+def _normalize_component_lengths(formulas, concentrations, densities, molar_masses):
+    component_count = len(formulas)
+    if component_count == 0:
+        raise ValueError('At least one chemical formula is required.')
+
+    def expand(values, name):
+        if not values:
+            raise ValueError(name + ' is required.')
+        if len(values) == 1 and component_count > 1:
+            return values * component_count
+        if len(values) != component_count:
+            raise ValueError(name + ' must have one value or match the number of formulas.')
+        return values
+
+    return (
+        expand(concentrations, 'concentrations'),
+        expand(densities, 'densities'),
+        expand(molar_masses, 'molar_masses'),
+    )
+
+
+def _first_value(value, default):
+    if value is None:
+        return default
+    if isinstance(value, np.ndarray):
+        if value.size == 0:
+            return default
+        return value.reshape(-1)[0].item()
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return default
+        return value[0]
+    return value
+
+
+def _has_value(value):
+    if value is None:
+        return False
+    if isinstance(value, np.ndarray):
+        return value.size > 0
+    if isinstance(value, (list, tuple, str)):
+        return len(value) > 0
+    return True
+
+
+def web_parameters_from_all_input(all_input):
+    params = dict(WEB_DEFAULT_PARAMETERS)
+
+    detector_params = all_input.get('detector', {})
+    analyzer_params = all_input.get('analyzer', {})
+    sample_params = all_input.get('sample', {})
+    thomson_params = all_input.get('thomson', {})
+    beam_params = all_input.get('beam', {})
+    compton_params = all_input.get('compton_profiles', {})
+
+    formulas = sample_params.get('chem_formulas')
+    if _has_value(formulas):
+        params['chem_formulas'] = _format_web_value(formulas)
+    concentrations = sample_params.get('concentrations')
+    if _has_value(concentrations):
+        params['concentrations'] = _format_web_value(concentrations)
+    densities = sample_params.get('densities')
+    if _has_value(densities):
+        params['densities'] = _format_web_value(densities)
+    molar_masses = sample_params.get('molar_masses')
+    if _has_value(molar_masses):
+        params['molar_masses'] = _format_web_value(molar_masses)
+
+    params['angle_tth'] = _format_web_value(
+        sample_params.get('angle_tth', WEB_DEFAULT_PARAMETERS['angle_tth'])
+    )
+    params['sample_thickness'] = _first_value(
+        sample_params.get('sample_thickness'),
+        WEB_DEFAULT_PARAMETERS['sample_thickness'],
+    )
+
+    eloss_range = np.asarray(compton_params.get('eloss_range', []), dtype=float)
+    if eloss_range.size:
+        params['eloss_min'] = float(np.min(eloss_range))
+        params['eloss_max'] = float(np.max(eloss_range))
+        params['points'] = int(min(max(eloss_range.size, 20), 2000))
+    params['E0'] = _first_value(compton_params.get('E0'), WEB_DEFAULT_PARAMETERS['E0'])
+
+    params['i0_intensity'] = _first_value(
+        beam_params.get('i0_intensity'),
+        WEB_DEFAULT_PARAMETERS['i0_intensity'],
+    )
+    params['beam_height'] = _first_value(
+        beam_params.get('beam_height'),
+        WEB_DEFAULT_PARAMETERS['beam_height'],
+    )
+    params['beam_width'] = _first_value(
+        beam_params.get('beam_width'),
+        WEB_DEFAULT_PARAMETERS['beam_width'],
+    )
+
+    params['detector_energy'] = _first_value(
+        detector_params.get('energy'),
+        WEB_DEFAULT_PARAMETERS['detector_energy'],
+    )
+    params['detector_thickness'] = _first_value(
+        detector_params.get('thickness'),
+        WEB_DEFAULT_PARAMETERS['detector_thickness'],
+    )
+    params['detector_material'] = detector_params.get(
+        'material',
+        WEB_DEFAULT_PARAMETERS['detector_material'],
+    )
+
+    params['analyzer_material'] = analyzer_params.get(
+        'material',
+        WEB_DEFAULT_PARAMETERS['analyzer_material'],
+    )
+    params['hkl'] = _format_web_value(
+        analyzer_params.get('hkl', WEB_DEFAULT_PARAMETERS['hkl'])
+    )
+    params['mask_d'] = _first_value(analyzer_params.get('mask_d'), WEB_DEFAULT_PARAMETERS['mask_d'])
+    params['bend_r'] = _first_value(analyzer_params.get('bend_r'), WEB_DEFAULT_PARAMETERS['bend_r'])
+    params['energy_resolution'] = _first_value(
+        analyzer_params.get('energy_resolution'),
+        WEB_DEFAULT_PARAMETERS['energy_resolution'],
+    )
+
+    params['scattering_plane'] = thomson_params.get(
+        'scattering_plane',
+        WEB_DEFAULT_PARAMETERS['scattering_plane'],
+    )
+    params['polarization'] = _first_value(
+        thomson_params.get('polarization'),
+        WEB_DEFAULT_PARAMETERS['polarization'],
+    )
+    return params
+
+
+def web_parameters_from_inp_text(text):
+    return web_parameters_from_all_input(get_all_input_from_text(text))
+
+
+def predict_from_parameters(parameters=None):
+    """
+    Calculate an XRS prediction from JSON-friendly parameters.
+
+    This helper is used by the web UI and can also be called from notebooks.
+    By default it uses a fast analyzer-efficiency value so interactive plots
+    update quickly. Set use_reflectivity=True to calculate the analyzer
+    efficiency with the existing Takagi-Taupin path.
+    """
+    params = dict(WEB_DEFAULT_PARAMETERS)
+    if parameters:
+        params.update(parameters)
+
+    formulas = _string_list(params.get('chem_formulas'), WEB_DEFAULT_PARAMETERS['chem_formulas'])
+    concentrations = _number_list(params.get('concentrations'), WEB_DEFAULT_PARAMETERS['concentrations'])
+    densities = _number_list(params.get('densities'), WEB_DEFAULT_PARAMETERS['densities'])
+    molar_masses = _number_list(params.get('molar_masses'), WEB_DEFAULT_PARAMETERS['molar_masses'])
+    concentrations, densities, molar_masses = _normalize_component_lengths(
+        formulas, concentrations, densities, molar_masses
+    )
+
+    eloss_min = _scalar(params.get('eloss_min'), WEB_DEFAULT_PARAMETERS['eloss_min'])
+    eloss_max = _scalar(params.get('eloss_max'), WEB_DEFAULT_PARAMETERS['eloss_max'])
+    points = max(20, min(2000, _scalar(params.get('points'), WEB_DEFAULT_PARAMETERS['points'], int)))
+    if eloss_max <= eloss_min:
+        raise ValueError('eloss_max must be greater than eloss_min.')
+
+    E0 = _scalar(params.get('E0'), WEB_DEFAULT_PARAMETERS['E0'])
+    tth_values = _number_list(params.get('angle_tth'), WEB_DEFAULT_PARAMETERS['angle_tth'])
+    angle_tth = tth_values[0] if len(tth_values) == 1 else tth_values
+    eloss_range = np.linspace(eloss_min, eloss_max, points)
+
+    sample_obj = sample(
+        formulas,
+        concentrations,
+        densities,
+        angle_tth,
+        _scalar(params.get('sample_thickness'), WEB_DEFAULT_PARAMETERS['sample_thickness']),
+        shape='sphere',
+        molar_masses=molar_masses,
+    )
+    beam_obj = beam(
+        _scalar(params.get('i0_intensity'), WEB_DEFAULT_PARAMETERS['i0_intensity']),
+        _scalar(params.get('beam_height'), WEB_DEFAULT_PARAMETERS['beam_height']),
+        _scalar(params.get('beam_width'), WEB_DEFAULT_PARAMETERS['beam_width']),
+    )
+    analyzer_obj = analyzer(
+        material=str(params.get('analyzer_material', WEB_DEFAULT_PARAMETERS['analyzer_material'])),
+        hkl=_number_list(params.get('hkl'), WEB_DEFAULT_PARAMETERS['hkl'], int),
+        mask_d=_scalar(params.get('mask_d'), WEB_DEFAULT_PARAMETERS['mask_d']),
+        bend_r=_scalar(params.get('bend_r'), WEB_DEFAULT_PARAMETERS['bend_r']),
+        energy_resolution=_scalar(params.get('energy_resolution'), WEB_DEFAULT_PARAMETERS['energy_resolution']),
+        diced=False,
+        thickness=500.0,
+        database_dir=installation_dir,
+    )
+    detector_obj = detector(
+        energy=_scalar(params.get('detector_energy'), WEB_DEFAULT_PARAMETERS['detector_energy']),
+        thickness=_scalar(params.get('detector_thickness'), WEB_DEFAULT_PARAMETERS['detector_thickness']),
+        material=str(params.get('detector_material', WEB_DEFAULT_PARAMETERS['detector_material'])),
+        pixel_size=[256, 768],
+    )
+    compton_profile_obj = compton_profiles(sample_obj, eloss_range, E0)
+    eloss, J, C, V, q = compton_profile_obj.get_HF_profiles()
+    thomson_obj = thomson(
+        compton_profile_obj.get_energy_in_keV(),
+        compton_profile_obj.get_E0(),
+        compton_profile_obj.get_tth(),
+        scattering_plane=str(params.get('scattering_plane', WEB_DEFAULT_PARAMETERS['scattering_plane'])),
+        polarization=_scalar(params.get('polarization'), WEB_DEFAULT_PARAMETERS['polarization']),
+    )
+
+    use_reflectivity = bool(params.get('use_reflectivity'))
+    if use_reflectivity:
+        analyzer_efficiency = float(np.asarray(analyzer_obj.get_efficiency(E0)).reshape(-1)[0])
+        efficiency_mode = 'calculated'
+    else:
+        analyzer_efficiency = _scalar(
+            params.get('analyzer_efficiency'),
+            WEB_DEFAULT_PARAMETERS['analyzer_efficiency'],
+        )
+        efficiency_mode = 'manual'
+
+    detector_efficiency = float(np.asarray(detector_obj.get_efficiency(E0)).reshape(-1)[0])
+    sample_abs_in = sample_obj.get_murho(compton_profile_obj.get_energy_in_keV())
+    thomson_factor = thomson_obj.get_thomson_factor()
+
+    sample_volume = beam_obj.get_beam_width_cm() * beam_obj.get_beam_height_cm() * sample_obj.get_thickness()
+    sample_amount = np.zeros(len(densities))
+    for index in range(len(densities)):
+        sample_weight = densities[index] * sample_volume * concentrations[index]
+        sample_amount[index] = sample_weight * molar_masses[index]
+    num_scatterers = float(np.sum(sample_amount) * constants.physical_constants['Avogadro constant'][0])
+
+    J_array = np.asarray(J)
+    if J_array.ndim == 1:
+        counts = (
+            beam_obj.get_i0_intensity()
+            * thomson_factor[:, 0]
+            * J_array
+            * analyzer_obj.get_solid_angle()
+            * analyzer_obj.get_energy_resolution()
+            * num_scatterers
+            * sample_obj.get_thickness()
+            * sample_abs_in
+            * analyzer_efficiency
+            * detector_efficiency
+        )
+        series = [{'name': 'absolute counts', 'values': counts.tolist()}]
+    else:
+        series = []
+        for index in range(J_array.shape[1]):
+            counts = (
+                beam_obj.get_i0_intensity()
+                * thomson_factor[:, index]
+                * J_array[:, index]
+                * analyzer_obj.get_solid_angle()
+                * analyzer_obj.get_energy_resolution()
+                * num_scatterers
+                * sample_obj.get_thickness()
+                * sample_abs_in
+                * analyzer_efficiency
+                * detector_efficiency
+            )
+            series.append({'name': 'tth ' + str(tth_values[index]), 'values': counts.tolist()})
+
+    return {
+        'parameters': params,
+        'x': np.asarray(eloss).tolist(),
+        'series': series,
+        'profiles': {
+            'J': np.asarray(J).tolist(),
+            'C': np.asarray(C).tolist(),
+            'V': np.asarray(V).tolist(),
+            'q': np.asarray(q).tolist(),
+        },
+        'meta': {
+            'detector_efficiency': detector_efficiency,
+            'analyzer_efficiency': analyzer_efficiency,
+            'analyzer_efficiency_mode': efficiency_mode,
+            'solid_angle': float(analyzer_obj.get_solid_angle()),
+            'num_scatterers': num_scatterers,
+        },
+    }
+
+
+def prediction_txt_from_parameters(parameters=None):
+    result = predict_from_parameters(parameters)
+    columns = [np.asarray(result['x'], dtype=float)]
+    header_names = ['energy_loss_eV']
+    for series in result['series']:
+        header_names.append(series['name'].replace(' ', '_') + '_per_sec')
+        columns.append(np.asarray(series['values'], dtype=float))
+    data = np.column_stack(columns)
+    handle = io.StringIO()
+    np.savetxt(handle, data, header=' '.join(header_names))
+    return handle.getvalue()
+
+
+def save_prediction_txt(parameters=None, output_txt='prediction_output.txt'):
+    if not output_txt:
+        raise ValueError('Output path is required.')
+    output_txt = os.path.expanduser(str(output_txt))
+    output_dir = os.path.dirname(os.path.abspath(output_txt))
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    text = prediction_txt_from_parameters(parameters)
+    with open(output_txt, 'w') as handle:
+        handle.write(text)
+    return os.path.abspath(output_txt)
+
+
+PREDICTION_WEB_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XRS Prediction Platform</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f2528;
+      --muted: #65737a;
+      --line: #d7dee2;
+      --panel: #ffffff;
+      --field: #f8fafb;
+      --accent: #0f766e;
+      --accent-strong: #0b5d57;
+      --warn: #a15c00;
+      --bg: #eef3f4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    button, input, select { font: inherit; }
+    #app { min-height: 100vh; }
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    aside {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      padding: 18px;
+      overflow: auto;
+    }
+    main {
+      padding: 20px;
+      overflow: auto;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 21px;
+      font-weight: 720;
+    }
+    .subhead {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 18px;
+    }
+    .section {
+      border-top: 1px solid var(--line);
+      padding: 14px 0 4px;
+    }
+    .section h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      text-transform: uppercase;
+      color: #405057;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 0;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--field);
+      color: var(--ink);
+      min-height: 36px;
+      padding: 7px 9px;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      outline: 2px solid rgba(15, 118, 110, 0.16);
+    }
+    .wide { grid-column: 1 / -1; }
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink);
+      min-height: 38px;
+    }
+    .toggle input {
+      width: 18px;
+      min-height: 18px;
+      accent-color: var(--accent);
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      border-radius: 6px;
+      min-height: 36px;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: white;
+      color: var(--accent-strong);
+    }
+    .status {
+      min-height: 22px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status.error { color: #b42318; }
+    .chart-area {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: calc(100vh - 40px);
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto minmax(360px, 1fr) auto;
+      gap: 14px;
+    }
+    .chart-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .chart-title {
+      display: grid;
+      gap: 2px;
+    }
+    .chart-title strong { font-size: 18px; }
+    .chart-title span { color: var(--muted); font-size: 13px; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(115px, 1fr));
+      gap: 8px;
+      min-width: min(100%, 470px);
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: #fbfcfc;
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 3px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+    .svg-wrap {
+      min-height: 360px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+      position: relative;
+    }
+    svg {
+      width: 100%;
+      height: 100%;
+      min-height: 360px;
+      display: block;
+    }
+    .axis { stroke: #8b9aa1; stroke-width: 1; }
+    .gridline { stroke: #edf1f3; stroke-width: 1; }
+    .curve {
+      fill: none;
+      stroke-width: 2.4;
+      vector-effect: non-scaling-stroke;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 18px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-swatch {
+      width: 18px;
+      height: 3px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+    .axis-label {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+    .empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .table {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    th:first-child, td:first-child { text-align: left; }
+    th {
+      position: sticky;
+      top: 0;
+      background: #f7f9fa;
+      color: #44535a;
+    }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      .chart-area { min-height: 520px; }
+      .metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="shell">
+      <aside>
+        <h1>XRS Prediction</h1>
+        <div class="subhead">Vue parameter platform</div>
+
+        <div class="section">
+          <h2>Files</h2>
+          <div class="grid">
+            <label class="wide">Import .inp<input type="file" accept=".inp,.txt" @change="importInp"></label>
+            <label class="wide">Output TXT path<input v-model="savePath"></label>
+          </div>
+          <div class="actions">
+            <button class="secondary" @click="downloadTxt">Download TXT</button>
+            <button class="secondary" @click="saveTxt">Save on server</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Sample</h2>
+          <div class="grid">
+            <label class="wide">Formula(s)<input v-model="form.chem_formulas"></label>
+            <label>Concentration<input v-model="form.concentrations"></label>
+            <label>Density g/cm3<input v-model="form.densities"></label>
+            <label>Molar mass<input v-model="form.molar_masses"></label>
+            <label>Thickness cm<input type="number" step="0.001" v-model.number="form.sample_thickness"></label>
+            <label>2 theta deg<input type="number" step="0.1" v-model.number="form.angle_tth"></label>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Energy</h2>
+          <div class="grid">
+            <label>E0 keV<input type="number" step="0.01" v-model.number="form.E0"></label>
+            <label>Points<input type="number" min="20" max="2000" step="10" v-model.number="form.points"></label>
+            <label>Loss min eV<input type="number" step="1" v-model.number="form.eloss_min"></label>
+            <label>Loss max eV<input type="number" step="1" v-model.number="form.eloss_max"></label>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Beam</h2>
+          <div class="grid">
+            <label class="wide">I0 photons/sec<input type="number" step="10000000000" v-model.number="form.i0_intensity"></label>
+            <label>Height micron<input type="number" step="1" v-model.number="form.beam_height"></label>
+            <label>Width micron<input type="number" step="1" v-model.number="form.beam_width"></label>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Analyzer</h2>
+          <div class="grid">
+            <label>Material<input v-model="form.analyzer_material"></label>
+            <label>HKL<input v-model="form.hkl"></label>
+            <label>Mask mm<input type="number" step="1" v-model.number="form.mask_d"></label>
+            <label>Bend radius m<input type="number" step="0.1" v-model.number="form.bend_r"></label>
+            <label>Resolution eV<input type="number" step="0.01" v-model.number="form.energy_resolution"></label>
+            <label>Efficiency<input type="number" step="0.01" min="0" max="1" v-model.number="form.analyzer_efficiency"></label>
+            <label class="toggle wide">Calculate reflectivity<input type="checkbox" v-model="form.use_reflectivity"></label>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Detector</h2>
+          <div class="grid">
+            <label>Material<input v-model="form.detector_material"></label>
+            <label>Energy keV<input type="number" step="0.01" v-model.number="form.detector_energy"></label>
+            <label class="wide">Thickness micron<input type="number" step="10" v-model.number="form.detector_thickness"></label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button @click="predict">Run</button>
+          <button class="secondary" @click="reset">Reset</button>
+        </div>
+        <div class="status" :class="{ error: error }">{{ error || status }}</div>
+      </aside>
+
+      <main>
+        <section class="chart-area">
+          <div class="chart-top">
+            <div class="chart-title">
+              <strong>Absolute Counts</strong>
+              <span>{{ subtitle }}</span>
+            </div>
+            <div class="metrics">
+              <div class="metric"><span>Detector efficiency</span><strong>{{ metric('detector_efficiency') }}</strong></div>
+              <div class="metric"><span>Analyzer efficiency</span><strong>{{ metric('analyzer_efficiency') }}</strong></div>
+              <div class="metric"><span>Solid angle</span><strong>{{ metric('solid_angle') }}</strong></div>
+            </div>
+          </div>
+
+          <div class="svg-wrap">
+            <svg viewBox="0 0 1000 520" preserveAspectRatio="none" role="img">
+              <line v-for="tick in yTicks" :key="'gy' + tick.y" class="gridline" :x1="pad.l" :x2="1000 - pad.r" :y1="tick.y" :y2="tick.y"></line>
+              <line v-for="tick in xTicks" :key="'gx' + tick.x" class="gridline" :x1="tick.x" :x2="tick.x" :y1="pad.t" :y2="520 - pad.b"></line>
+              <polyline v-for="curve in curves" :key="curve.name" class="curve" :points="curve.points" :stroke="curve.color"></polyline>
+              <line class="axis" :x1="pad.l" :x2="1000 - pad.r" :y1="520 - pad.b" :y2="520 - pad.b"></line>
+              <line class="axis" :x1="pad.l" :x2="pad.l" :y1="pad.t" :y2="520 - pad.b"></line>
+              <text v-for="tick in yTicks" :key="'ly' + tick.y" class="axis-label" :x="pad.l - 10" :y="tick.y + 4" text-anchor="end">{{ tick.label }}</text>
+              <text v-for="tick in xTicks" :key="'lx' + tick.x" class="axis-label" :x="tick.x" y="502" text-anchor="middle">{{ tick.label }}</text>
+              <text class="axis-label" x="500" y="516" text-anchor="middle">energy loss (eV)</text>
+              <text class="axis-label" x="16" y="260" transform="rotate(-90 16 260)" text-anchor="middle">counts / sec</text>
+            </svg>
+            <div v-if="!curves.length" class="empty">No data</div>
+          </div>
+          <div class="legend">
+            <span v-for="curve in curves" :key="'legend-' + curve.name" class="legend-item">
+              <span class="legend-swatch" :style="{ background: curve.color }"></span>
+              <span>{{ curve.name }}</span>
+            </span>
+          </div>
+
+          <div class="table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Energy loss eV</th>
+                  <th v-for="series in seriesList" :key="'head-' + series.name">{{ series.name }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in previewRows" :key="row.x">
+                  <td>{{ fmt(row.x) }}</td>
+                  <td v-for="series in seriesList" :key="row.x + '-' + series.name">{{ fmt(series.values[row.index]) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const defaults = __DEFAULTS__;
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          form: { ...defaults },
+          savePath: defaults.output_txt || 'prediction_output.txt',
+          result: null,
+          status: 'Ready',
+          error: '',
+          timer: null,
+          requestId: 0,
+          colors: ['#0f766e', '#b45309', '#2563eb', '#be123c', '#6d28d9', '#15803d'],
+          pad: { l: 78, r: 24, t: 24, b: 48 }
+        };
+      },
+      computed: {
+        x() { return this.result?.x || []; },
+        seriesList() { return this.result?.series || []; },
+        pointsBySeries() {
+          return this.seriesList.map((series, seriesIndex) => ({
+            name: series.name,
+            color: this.colors[seriesIndex % this.colors.length],
+            points: this.x.map((xValue, index) => ({
+              x: Number(xValue),
+              y: Number(series.values[index])
+            })).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+          }));
+        },
+        bounds() {
+          const points = this.pointsBySeries.flatMap(series => series.points);
+          if (!points.length) return null;
+          const xs = points.map(point => point.x);
+          const ys = points.map(point => point.y);
+          const xmin = Math.min(...xs), xmax = Math.max(...xs);
+          let ymin = Math.min(...ys), ymax = Math.max(...ys);
+          if (ymin === ymax) { ymin -= 1; ymax += 1; }
+          const margin = (ymax - ymin) * 0.08;
+          return { xmin, xmax, ymin: ymin - margin, ymax: ymax + margin };
+        },
+        curves() {
+          if (!this.bounds) return [];
+          const w = 1000 - this.pad.l - this.pad.r;
+          const h = 520 - this.pad.t - this.pad.b;
+          return this.pointsBySeries.map(series => ({
+            name: series.name,
+            color: series.color,
+            points: series.points.map(point => {
+              const px = this.pad.l + ((point.x - this.bounds.xmin) / (this.bounds.xmax - this.bounds.xmin || 1)) * w;
+              const py = this.pad.t + (1 - ((point.y - this.bounds.ymin) / (this.bounds.ymax - this.bounds.ymin || 1))) * h;
+              return `${px.toFixed(2)},${py.toFixed(2)}`;
+            }).join(' ')
+          })).filter(curve => curve.points);
+        },
+        xTicks() {
+          if (!this.bounds) return [];
+          return Array.from({ length: 6 }, (_, index) => {
+            const ratio = index / 5;
+            const value = this.bounds.xmin + (this.bounds.xmax - this.bounds.xmin) * ratio;
+            return {
+              x: this.pad.l + (1000 - this.pad.l - this.pad.r) * ratio,
+              label: this.fmt(value)
+            };
+          });
+        },
+        yTicks() {
+          if (!this.bounds) return [];
+          return Array.from({ length: 5 }, (_, index) => {
+            const ratio = index / 4;
+            const value = this.bounds.ymax - (this.bounds.ymax - this.bounds.ymin) * ratio;
+            return {
+              y: this.pad.t + (520 - this.pad.t - this.pad.b) * ratio,
+              label: this.fmt(value)
+            };
+          });
+        },
+        previewRows() {
+          const rows = [];
+          const step = Math.max(1, Math.floor(this.x.length / 12));
+          for (let index = 0; index < this.x.length; index += step) {
+            rows.push({ index, x: this.x[index] });
+          }
+          return rows.slice(0, 12);
+        },
+        subtitle() {
+          const mode = this.result?.meta?.analyzer_efficiency_mode || 'manual';
+          return `${this.form.chem_formulas} at ${this.form.angle_tth} deg, analyzer efficiency ${mode}`;
+        }
+      },
+      watch: {
+        form: {
+          deep: true,
+          handler() {
+            clearTimeout(this.timer);
+            this.timer = setTimeout(() => this.predict(), 350);
+          }
+        }
+      },
+      mounted() {
+        this.predict();
+      },
+      methods: {
+        async importInp(event) {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          this.status = `Importing ${file.name}...`;
+          this.error = '';
+          try {
+            const text = await file.text();
+            const response = await fetch('/api/import-inp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text })
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Import failed');
+            this.form = { ...defaults, ...payload.parameters };
+            this.savePath = file.name.replace(/\.(inp|txt)$/i, '') + '_prediction.txt';
+            this.status = `Imported ${file.name}`;
+          } catch (error) {
+            this.error = error.message;
+            this.status = '';
+          } finally {
+            event.target.value = '';
+          }
+        },
+        async predict() {
+          const id = ++this.requestId;
+          this.status = this.form.use_reflectivity ? 'Calculating reflectivity...' : 'Calculating...';
+          this.error = '';
+          try {
+            const response = await fetch('/api/predict', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.form)
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Prediction failed');
+            if (id !== this.requestId) return;
+            this.result = payload;
+            this.status = `Updated ${new Date().toLocaleTimeString()}`;
+          } catch (error) {
+            if (id !== this.requestId) return;
+            this.error = error.message;
+            this.status = '';
+          }
+        },
+        reset() {
+          this.form = { ...defaults };
+          this.savePath = defaults.output_txt || 'prediction_output.txt';
+        },
+        async saveTxt() {
+          this.status = 'Saving...';
+          this.error = '';
+          try {
+            const response = await fetch('/api/save-prediction', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parameters: this.form, output_txt: this.savePath })
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Save failed');
+            this.status = `Saved ${payload.path}`;
+          } catch (error) {
+            this.error = error.message;
+            this.status = '';
+          }
+        },
+        downloadTxt() {
+          if (!this.result) {
+            this.error = 'Run a prediction before downloading.';
+            return;
+          }
+          const text = this.resultText();
+          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = (this.savePath || 'prediction_output.txt').split(/[\\/]/).pop() || 'prediction_output.txt';
+          document.body.appendChild(link);
+          link.click();
+          URL.revokeObjectURL(link.href);
+          link.remove();
+          this.status = `Prepared ${link.download}`;
+        },
+        resultText() {
+          const names = ['energy_loss_eV', ...this.result.series.map(item => `${item.name.replace(/\s+/g, '_')}_per_sec`)];
+          const lines = [`# ${names.join(' ')}`];
+          for (let index = 0; index < this.result.x.length; index += 1) {
+            const row = [this.result.x[index], ...this.result.series.map(item => item.values[index])];
+            lines.push(row.map(value => Number(value).toExponential(18)).join(' '));
+          }
+          return lines.join('\n') + '\n';
+        },
+        metric(key) {
+          const value = this.result?.meta?.[key];
+          return value === undefined ? '-' : this.fmt(value);
+        },
+        fmt(value) {
+          if (!Number.isFinite(Number(value))) return '-';
+          const number = Number(value);
+          if (Math.abs(number) >= 1e4 || (Math.abs(number) > 0 && Math.abs(number) < 1e-3)) {
+            return number.toExponential(3);
+          }
+          return number.toLocaleString(undefined, { maximumSignificantDigits: 5 });
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
+"""
+
+
+class PredictionRequestHandler(BaseHTTPRequestHandler):
+    def _send_json(self, payload, status=200):
+        body = json.dumps(payload).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self):
+        html = PREDICTION_WEB_HTML.replace('__DEFAULTS__', json.dumps(WEB_DEFAULT_PARAMETERS))
+        body = html.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path in ('/', '/index.html'):
+            self._send_html()
+        elif path == '/api/defaults':
+            self._send_json(WEB_DEFAULT_PARAMETERS)
+        else:
+            self._send_json({'error': 'Not found'}, status=404)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            raw_body = self.rfile.read(length) if length else b'{}'
+            payload = json.loads(raw_body.decode('utf-8'))
+            if path == '/api/predict':
+                self._send_json(predict_from_parameters(payload))
+            elif path == '/api/import-inp':
+                self._send_json({'parameters': web_parameters_from_inp_text(payload.get('text', ''))})
+            elif path == '/api/save-prediction':
+                output_path = payload.get('output_txt') or WEB_DEFAULT_PARAMETERS['output_txt']
+                saved_path = save_prediction_txt(payload.get('parameters', {}), output_path)
+                self._send_json({'path': saved_path})
+            else:
+                self._send_json({'error': 'Not found'}, status=404)
+        except Exception as exc:
+            self._send_json({'error': str(exc)}, status=400)
+
+    def log_message(self, format, *args):
+        return
+
+
+def serve_web(host='127.0.0.1', port=8765):
+    server = ThreadingHTTPServer((host, port), PredictionRequestHandler)
+    print('XRS prediction platform running at http://%s:%s' % (host, port))
+    print('Press Ctrl+C to stop the server.')
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print('\nStopping XRS prediction platform.')
+    finally:
+        server.server_close()
+
+
 def run(filename='prediction.inp', output_txt=None):
     """
     Function to create a spectrum prediction from input parameters provided in the input file filename.
@@ -850,21 +1984,19 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(description='Create an XRS spectrum prediction.')
     parser.add_argument('-f', '--file', dest='filename', default='prediction.inp', help='read input from FILE')
     parser.add_argument('-o', '--output-txt', dest='output_txt', default=None, help='save calculated prediction to FILE')
+    parser.add_argument('--web', action='store_true', help='start the Vue parameter input platform')
+    parser.add_argument('--host', default='127.0.0.1', help='web server host for --web')
+    parser.add_argument('--port', type=int, default=8765, help='web server port for --web')
     return parser
 
 
 def main(argv=None):
     options = build_arg_parser().parse_args(argv)
+    if options.web:
+        serve_web(options.host, options.port)
+        return None
     return run(options.filename, options.output_txt)
 
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
