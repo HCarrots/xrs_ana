@@ -1117,6 +1117,7 @@ class edge_extraction:
         plt.ion()
         for col in columns:
             pz_dmy = xrs_utilities.e2pz(self.eloss/1.0e3+self.E0, self.E0, self.tth[col])[0]
+            
             core = self._core_profile(element, edge, column=col)
 
             if linrange1 and linrange2:
@@ -1191,6 +1192,7 @@ class edge_extraction:
             self.valasymmetry[:,col] = asym
         self._sync_valence_CP()
         plt.ioff()
+        return pz_dmy, val
 
     def getallvalprof(self,whichq,smoothgval=0.0,stoploop=True):
         """
