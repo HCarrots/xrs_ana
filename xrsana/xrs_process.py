@@ -1233,6 +1233,12 @@ class XRSProcess:
             return f(x_new)
 
         # ------------------------------------------------------------------
+        # Prepare storage for Pearson VII info (so user can draw later).
+        # ------------------------------------------------------------------
+        if not hasattr(self, "pearson_info"):
+            self.pearson_info = {}
+
+        # ------------------------------------------------------------------
         # Main loop over q columns.
         # ------------------------------------------------------------------
         plt.ion()
@@ -1443,6 +1449,11 @@ class XRSProcess:
                     pearson_fitfct,
                     start_param
                 )[0]
+
+                self.pearson_info[col] = {
+                    "params": pearson_param,
+                    "edge": edge,
+                }
 
                 pearson = pearson7(pz_col, pearson_param)
 

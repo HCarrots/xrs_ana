@@ -82,7 +82,7 @@ processor.extractval(
     mirror=False,
     linrange1=(10, 20),
     linrange2=(80, 100),
-    edge_pz=1.7,
+    edge_pz=0.8,
     make_plots=True,
 )
 
@@ -94,7 +94,7 @@ processor.get_all_valprof(1,0,make_plots= False,wait_for_input =False,interp_kin
         q_epsilon = 1e-12,
         return_components = False,)
 fit = processor.remv_alence_prof(
-    whichq=[0, 2, 3],     
+    whichq=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],     
     eoffset=0.0,
     fit_shift=True,
     initial_scale=1.0,
@@ -117,7 +117,7 @@ result = processor.averageqs(
 )
 
 processor.plotsqwav(
-    emin=5,
+    emin=20,
     emax=250,
     show_error=True,
 )
