@@ -1,5 +1,4 @@
 #!/usr/bin/python
-# Filename: theory2.py
 #/*##########################################################################
 #
 # The XRStools software package for XRS spectroscopy
