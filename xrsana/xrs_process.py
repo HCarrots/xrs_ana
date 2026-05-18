@@ -563,43 +563,53 @@ class XRSProcess:
             # 5. Optional diagnostic plot
             # -----------------------------
             if plot:
-                plt.figure()
+            # 全局学术样式（和你之前完全一致）
+                plt.rcParams.update({
+                    'font.family': 'serif',
+                    'font.serif': ['Times New Roman'],
+                    'font.size': 12,
+                    'axes.labelsize': 14,
+                    'axes.titlesize': 12,
+                    'xtick.labelsize': 12,
+                    'ytick.labelsize': 12,
+                    'legend.fontsize': 12,
+                    'figure.dpi': 300,
+                    'savefig.dpi': 300,
+                    'savefig.bbox': 'tight',
+                })
 
-                plt.plot(eloss, scaled_signal, label="scaled signal")
-                plt.plot(
-                    eloss,
-                    polynomial_background + shifted_core,
-                    label="polynomial + shifted core",
-                    linestyle='--'
-                )
-                plt.plot(
-                    eloss,
-                    polynomial_background,
-                    label="polynomial background",
-                )
-                plt.plot(
-                    eloss,
-                    corrected_spectrum,
-                    label="signal - polynomial",
-                )
-                plt.plot(
-                    eloss,
-                    shifted_core,
-                    label="shifted core profile",
-                )
+                # 创建画布
+                fig, ax = plt.subplots(figsize=(8, 5))
 
+                # 绘制多条曲线
+                ax.plot(eloss, scaled_signal, label="scaled signal", linewidth=1.2)
+                ax.plot(eloss, polynomial_background + shifted_core, label="polynomial + shifted core",
+                        linestyle='--', linewidth=1.2)
+                ax.plot(eloss, polynomial_background, label="polynomial background", linewidth=1.2)
+                ax.plot(eloss, corrected_spectrum, label="signal - polynomial", linewidth=1.2)
+                ax.plot(eloss, shifted_core, label="shifted core profile", linewidth=1.2)
+
+                # 坐标轴范围（完全保留原逻辑）
                 xmin = min(polyregion[0], coreregion[0]) - ewindow
                 xmax = polyregion[1] if np.isfinite(polyregion[1]) else eloss[-1]
                 xmax = max(xmax, coreregion[1] if np.isfinite(coreregion[1]) else eloss[-1]) + ewindow
+                ax.set_xlim(xmin, xmax)
 
-                plt.xlim(xmin, xmax)
-                plt.xlabel("energy loss [eV]")
-                plt.ylabel("DDSCS")
-                plt.title(f"q-channel {col}")
-                plt.legend()
+                # 标题、坐标轴
+                ax.set_xlabel("energy loss [eV]")
+                ax.set_ylabel("DDSCS [arb. units]")
+                ax.set_title(f"q-channel {col}", pad=15)
+
+                # 图例 + 网格（底层显示，不遮挡曲线）
+                ax.legend(frameon=False)
+                ax.grid(True, linestyle='--', alpha=0.5, color='lightgray', zorder=0)
+                ax.set_axisbelow(True)
+
+                # 显示 + 关闭画布
                 plt.tight_layout()
-                plt.show()
-
+                fig.savefig(f'/home/hushiqi/work/xrs_ana/pictemp/q_channel_{col}.pdf')
+                fig.savefig(f'/home/hushiqi/work/xrs_ana/pictemp/q_channel_{col}.png')
+                plt.close(fig)
         return results    
 
 
@@ -977,57 +987,80 @@ class XRSProcess:
             # 5. Optional diagnostic plot
             # -----------------------------
             if plot:
-                plt.figure()
+                plt.rcParams.update({
+                    'font.family': 'serif',
+                    'font.serif': ['Times New Roman'],
+                    'font.size': 12,
+                    'axes.labelsize': 14,
+                    'axes.titlesize': 16,
+                    'xtick.labelsize': 12,
+                    'ytick.labelsize': 12,
+                    'legend.fontsize': 12,
+                    'figure.dpi': 300,
+                    'savefig.dpi': 300,
+                    'savefig.bbox': 'tight',
+                })
 
-                plt.plot(eloss, scaled_signal, label="scaled signal")
+                # 创建画布（固定尺寸，绘图更稳定）
+                fig, ax = plt.subplots(figsize=(8, 5))
 
-                plt.plot(
+                # 1. 绘制所有曲线（完全保留原线条宽度、线型）
+                ax.plot(eloss, scaled_signal, label="scaled signal", linewidth=1.2)
+
+                ax.plot(
                     eloss,
                     polynomial_background + shifted_core,
                     label="polynomial + shifted core",
-                    linestyle = "--"
+                    linestyle="--",
+                    linewidth=1.2
                 )
-                
-                plt.plot(
+
+                ax.plot(
                     eloss,
                     polynomial_background,
                     label="polynomial background",
                     linewidth=0.5
                 )
 
-                plt.plot(
+                ax.plot(
                     eloss,
                     corrected_spectrum,
                     label="signal - polynomial",
+                    linewidth=1.2
                 )
 
-                plt.plot(
+                ax.plot(
                     eloss,
                     shifted_core,
                     label="shifted core profile",
                     linewidth=0.5
                 )
 
-                # Mark polynomial fitting regions
+                # 2. 绘制多项式拟合区域阴影（完全保留原逻辑）
                 for i, (emin, emax) in enumerate(poly_regions):
                     label = "polyregion" if i == 0 else None
-                    plt.axvspan(
+                    ax.axvspan(
                         emin,
                         emax,
                         alpha=0.15,
                         label=label,
+                        color='gray'  # 统一阴影颜色，更美观
                     )
 
-                # Mark core fitting region
-                plt.axvspan(
+                # 3. 绘制核心拟合区域阴影
+                ax.axvspan(
                     core_emin,
                     core_emax,
                     alpha=0.15,
                     label="coreregion",
+                    color='orange'  # 区分区域，可视化更清晰
                 )
 
-                plt.grid(True, alpha=0.3, linestyle='--')
+                # 4. 网格设置（置于底层，不遮挡曲线）
+                ax.grid(True, alpha=0.3, linestyle='--', color='lightgray')
+                ax.set_axisbelow(True)
 
+                # 5. 计算坐标轴范围（原逻辑完全保留）
                 all_region_edges = [
                     pre_emin,
                     pre_emax,
@@ -1036,18 +1069,24 @@ class XRSProcess:
                     core_emin,
                     core_emax,
                 ]
-
                 xmin = min(all_region_edges) - ewindow
                 xmax = max(all_region_edges) + ewindow
+                ax.set_xlim(xmin, xmax)
 
-                plt.xlim(xmin, xmax)
-                plt.xlabel("energy loss [eV]")
-                plt.ylabel("DDSCS")
-                plt.title(f"q-channel {col}")
-                plt.legend()
+                # 6. 坐标轴与标题（学术规范：标题间距+统一字体）
+                ax.set_xlabel("energy loss [eV]")
+                ax.set_ylabel("DDSCS [arb. units]")
+                ax.set_title(f"q-channel {col} Valence electron profile correction", pad=15)
+
+                # 7. 图例（无边框，期刊标准）
+                ax.legend(frameon=False)
+
+                # 8. 紧凑布局 + 显示 + 释放内存
                 plt.tight_layout()
-                plt.show()
-
+                #plt.show()
+                fig.savefig(f'/home/hushiqi/work/xrs_ana/pictemp/q_channel_2{col}.pdf')
+                fig.savefig(f'/home/hushiqi/work/xrs_ana/pictemp/q_channel_2{col}.png')
+                plt.close(fig)
         return results
 
     def extractval(
@@ -1367,15 +1406,15 @@ class XRSProcess:
                 corrected = extracted.copy()
 
                 if make_plots:
-                    plt.figure()
-                    plt.plot(pz_col, val_raw, pz_col, extracted)
-                    plt.legend([
-                        "exp. S(q,w) - HF core profile",
-                        "mirrored extracted valence profile",
-                    ])
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(pz_col, val_raw, label="exp. S(q,w) — HF core profile")
+                    plt.plot(pz_col, extracted, label="mirrored extracted valence profile")
+                    plt.legend()
                     plt.xlabel("pz [a.u.]")
                     plt.ylabel("S(q,w) [1/eV]")
                     plt.title(f"q column {col}: mirrored valence extraction")
+                    plt.grid(True, linestyle='--', alpha=0.5, color='gray')
+                    plt.tight_layout()
                     plt.draw()
 
                     if wait_for_input:
@@ -1399,8 +1438,8 @@ class XRSProcess:
                         "should be replaced by a Pearson function."
                     )
 
-                    plt.figure()
-                    plt.plot(pz_col, val_raw)
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(pz_col, val_raw, label="raw valence profile")
 
                     mask_for_ylim = pz_col < 2.0
                     if np.any(mask_for_ylim):
@@ -1412,6 +1451,9 @@ class XRSProcess:
                     plt.xlabel("pz [a.u.]")
                     plt.ylabel("S(q,w) [1/eV]")
                     plt.title(f"q column {col}: select Pearson edge boundary")
+                    plt.legend()
+                    plt.grid(True, linestyle='--', alpha=0.5, color='gray')
+                    plt.tight_layout()
                     plt.draw()
 
                     xyval = plt.ginput(1)[0]
@@ -1519,16 +1561,16 @@ class XRSProcess:
                 corrected = extracted - asym
 
                 if make_plots:
-                    plt.figure()
-                    plt.plot(pz_col, extracted, pz_col, asym, pz_col, corrected)
-                    plt.legend([
-                        "extracted valence profile",
-                        "fitted valence asymmetry",
-                        "asymmetry corrected valence profile",
-                    ])
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(pz_col, extracted, label="extracted valence profile")
+                    plt.plot(pz_col, asym, label="fitted valence asymmetry")
+                    plt.plot(pz_col, corrected, label="asymmetry corrected valence profile")
+                    plt.legend()
                     plt.xlabel("pz [a.u.]")
                     plt.ylabel("S(q,w) [1/eV]")
                     plt.title(f"q column {col}: asymmetry correction")
+                    plt.grid(True, linestyle='--', alpha=0.5, color='gray')
+                    plt.tight_layout()
                     plt.draw()
 
                     if wait_for_input:
@@ -1750,13 +1792,15 @@ class XRSProcess:
                 newasym[valid_q, n] = asym_interp[valid_q] / q[valid_q]
 
                 if make_plots:
-                    fig, ax = plt.subplots()
+                    fig, ax = plt.subplots(figsize=(8, 5))
                     ax.plot(self.eloss, newvalence[:, n], label="valence")
                     ax.plot(self.eloss, newasym[:, n], label="asymmetry")
                     ax.set_xlabel("Energy loss [eV]")
                     ax.set_ylabel("Intensity")
                     ax.set_title(f"Transformed valence profile, q column {n}")
                     ax.legend()
+                    ax.grid(True, linestyle='--', alpha=0.4, color='gray')
+                    fig.tight_layout()
                     fig.canvas.draw_idle()
 
                     if wait_for_input:
@@ -1975,7 +2019,7 @@ class XRSProcess:
                 if make_plots:
                     full_model = self.HF_dataset.C_total[:, col] + fitted_valence + background
 
-                    fig, ax = plt.subplots()
+                    fig, ax = plt.subplots(figsize=(8, 5))
                     ax.plot(self.eloss, self.signals[:, col], label="signal")
                     ax.plot(self.eloss, full_model, label="C + valence + background")
                     ax.plot(self.eloss, background, label="background")
@@ -1985,6 +2029,8 @@ class XRSProcess:
                     ax.set_ylabel("Intensity")
                     ax.set_title(f"Valence removal, q column {col}")
                     ax.legend()
+                    ax.grid(True, linestyle='--', alpha=0.4, color='gray')
+                    fig.tight_layout()
                     fig.canvas.draw_idle()
 
                     if wait_for_input:
@@ -2218,16 +2264,16 @@ class XRSProcess:
         return None
     
     def plotsqwav(
-        self,
-        *,
-        emin=None,
-        emax=None,
-        show_error=True,
-        normalize=False,
-        normrange=None,
-        title="Averaged S(q, ω)",
-        savepath=None,
-    ):
+            self,
+            *,
+            emin=None,
+            emax=None,
+            show_error=True,
+            normalize=False,
+            normrange=None,
+            title="Averaged S(q, ω)",
+            savepath=None,
+        ):
         """
         Plot averaged S(q,w) with optional error band.
 
@@ -2250,6 +2296,21 @@ class XRSProcess:
         """
         import numpy as np
         import matplotlib.pyplot as plt
+
+        # 全局学术绘图配置（与你所有代码100%风格统一）
+        plt.rcParams.update({
+            'font.family': 'serif',
+            'font.serif': ['Times New Roman'],
+            'font.size': 12,
+            'axes.labelsize': 14,
+            'axes.titlesize': 16,
+            'xtick.labelsize': 12,
+            'ytick.labelsize': 12,
+            'legend.fontsize': 12,
+            'figure.dpi': 300,
+            'savefig.dpi': 300,
+            'savefig.bbox': 'tight',
+        })
 
         if not hasattr(self, "sqwav") or not hasattr(self, "sqwaverr"):
             raise AttributeError(
@@ -2304,30 +2365,45 @@ class XRSProcess:
         y = sqwav[mask]
         yerr = sqwaverr[mask]
 
+        # 保留原画布尺寸(7,4.5)，保持原有宽高比
         fig, ax = plt.subplots(figsize=(7, 4.5))
 
-        ax.plot(x, y, label="averaged S(q, ω)")
+        # 统一曲线样式：标准学术蓝+1.2线宽
+        ax.plot(
+            x, y,
+            color='#1f77b4',
+            linewidth=1.2,
+            label="averaged S(q, ω)"
+        )
 
         if show_error:
+            # 误差带与曲线同色，视觉更统一
             ax.fill_between(
                 x,
                 y - yerr,
                 y + yerr,
+                color='#1f77b4',
                 alpha=0.25,
                 label="±1σ error",
             )
 
+        # 标题与坐标轴（增加标题间距避免拥挤）
         ax.set_xlabel("Energy loss [eV]")
         ax.set_ylabel("S(q, ω)")
-        ax.set_title(title)
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.set_title(title, pad=15)
+
+        # 无边框图例（期刊标准）+ 网格置于底层
+        ax.legend(frameon=False)
+        ax.grid(True, linestyle='--', alpha=0.3, color='lightgray', zorder=0)
+        ax.set_axisbelow(True)
 
         fig.tight_layout()
 
         if savepath is not None:
-            fig.savefig(savepath, dpi=300, bbox_inches="tight")
+            # 全局已配置dpi和bbox，无需重复传参
+            fig.savefig(savepath)
 
-        plt.show()
+        #plt.show()
+        plt.close(fig)  # 自动释放内存，避免批量绘图时泄漏
 
         return fig, ax

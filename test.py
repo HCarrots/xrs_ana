@@ -29,18 +29,42 @@ processor = xrs_process.XRSProcess(data, ["Ho"], [1], {"Ho": ["N4"]})
 processor.xrs_remove_elastic()
 processor.xrs_remove_stray_background()
 
-plt.figure(figsize=(10, 6))
-plt.plot(processor.eloss, processor.signals, label='Raw Signal (Mask)')
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12,
+    'figure.dpi': 300,
+    'savefig.dpi': 300,
+    'savefig.bbox': 'tight',
+})
 
+fig, ax = plt.subplots(figsize=(8, 5))
 
-plt.title('Background Fitting (Mask Region Only)')
-plt.xlabel('Energy Loss')
-plt.ylabel('Signal')
-plt.legend()
-plt.grid(True, linestyle='--', alpha=0.7, color='gray')
-plt.show()
+ax.plot(
+    processor.eloss,
+    processor.signals,
+    color='#1f77b4',
+    linewidth=1.2,
+    label='Raw Signal (Mask Region)'
+)
 
-plt.figure(figsize=(10, 6))
+ax.set_title('Inelastic peak full spectrum', pad=15)
+ax.set_xlabel('Energy Loss [eV]')
+ax.set_ylabel('Intensity [arb. units]')
+
+ax.grid(True, linestyle='--', alpha=0.5, color='lightgray', zorder=0)
+ax.set_axisbelow(True)
+#ax.legend(frameon=False)
+
+fig.savefig('/home/hushiqi/report/2026-5-5/pic/pictemp/mask.pdf')
+fig.savefig('/home/hushiqi/report/2026-5-5/pic/pictemp/mask.png')
+plt.close(fig)
+
 
 I0 = 1e13
 sample_ro = 8.79
@@ -48,10 +72,79 @@ M = 164.93
 sample_thickness = 0.1
 pz = processor.xrs_energy_correction(0,8.79,sample_thickness,whichq=1)
 
-plt.plot(processor.eloss,processor.signals[:,1])
-plt.show()
-plt.plot(pz,processor.signals[:,1])
-plt.show()
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+ax.plot(
+    processor.eloss,
+    processor.signals[:, 1],       
+    color='#1f77b4',
+    linewidth=1.2,
+    label=f'q-channel 1 (tth={processor.tth[1]:.1f}°)'
+)
+
+
+ax.set_title('Energy Loss vs Intensity — q-channel 1', pad=15)
+ax.set_xlabel('Energy Loss [eV]')
+ax.set_ylabel('Intensity [arb. units]')
+
+
+ax.legend(frameon=False) 
+ax.grid(True, linestyle='--', alpha=0.5, color='lightgray', zorder=0)
+ax.set_axisbelow(True)    
+
+fig.savefig('/home/hushiqi/work/xrs_ana/pictemp/q-channel-1.pdf')
+fig.savefig('/home/hushiqi/work/xrs_ana/pictemp/q-channel-1.png')
+plt.close(fig)
+
+
+
+
+
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12,
+    'figure.dpi': 300,
+    'savefig.dpi': 300,
+    'savefig.bbox': 'tight',
+})
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+
+ax.plot(
+    pz[:, 0],
+    processor.signals[:, 1],
+    color='#1f77b4',
+    linewidth=1.2,
+    label=f'q-channel 1 (tth={processor.tth[1]:.1f}°)'
+)
+
+
+ax.set_title('q-channel 1 in Momentum Space Signal', pad=15)
+ax.set_xlabel('pz [a.u.]')
+ax.set_ylabel('Intensity [arb. units]')
+
+
+ax.legend(frameon=False)
+ax.grid(True, linestyle='--', alpha=0.5, color='lightgray', zorder=0)
+ax.set_axisbelow(True)
+
+
+fig.savefig('/home/hushiqi/work/xrs_ana/pictemp/Momentum.pdf')
+fig.savefig('/home/hushiqi/work/xrs_ana/pictemp/Momentum.png')
+
+plt.close(fig)
+
+
+
+
 
 processor.xrs_remove_poly_core(
         whichq = 1,
@@ -64,6 +157,7 @@ processor.xrs_remove_poly_core(
         plot=True,
         ewindow=100.0,
         save_result=True,)
+
 
 processor.xrs_remove_poly_core_2(
         whichq = 1,
@@ -83,16 +177,72 @@ processor.extractval(
     linrange1=(10, 20),
     linrange2=(80, 100),
     edge_pz=0.8,
-    make_plots=True,
+    make_plots=False,
 )
 
-plt.plot(processor.eloss,processor.valence,label = "valence")
-plt.plot(processor.eloss,processor.valasymmetry,label = "valasymmetry")
-plt.show()
 
-processor.get_all_valprof(1,0,make_plots= False,wait_for_input =False,interp_kind ="linear",
-        q_epsilon = 1e-12,
-        return_components = False,)
+
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12,
+    'figure.dpi': 300,
+    'savefig.dpi': 300,
+    'savefig.bbox': 'tight',
+})
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+# 绘制曲线（统一线条宽度，区分颜色提升可读性）
+ax.plot(
+    processor.eloss,
+    processor.valence,
+    color='#1f77b4',  # 标准Matplotlib蓝色
+    linewidth=1.2,
+    label="valence"
+)
+ax.plot(
+    processor.eloss,
+    processor.valasymmetry,
+    color='#ff7f0e',  # 标准Matplotlib橙色
+    linewidth=1.2,
+    label="valence asymmetry"
+)
+
+# 标题与坐标轴（学术规范：标题增加间距避免拥挤）
+ax.set_title('Extracted Valence & Asymmetry Profiles', pad=15)
+ax.set_xlabel('Energy Loss [eV]')
+ax.set_ylabel('Intensity [arb. units]')
+
+# 图例与网格（网格置于底层，不遮挡数据）
+#ax.legend(frameon=False)  # 无边框图例，期刊标准样式
+ax.grid(True, linestyle='--', alpha=0.5, color='lightgray', zorder=0)
+ax.set_axisbelow(True)
+
+# 紧凑布局 + 显示 + 释放内存
+plt.tight_layout()
+# 按图名保存，避免覆盖
+fig.savefig('/home/hushiqi/work/xrs_ana/pictemp/valence_asymmetry_profiles.pdf')
+fig.savefig('/home/hushiqi/work/xrs_ana/pictemp/valence_asymmetry_profiles.png')
+plt.close(fig)
+
+
+
+
+processor.get_all_valprof(
+    1,
+    0,
+    make_plots= False,
+    wait_for_input =False,
+    interp_kind ="linear",
+    q_epsilon = 1e-12,
+    return_components = False)
+
 fit = processor.remv_alence_prof(
     whichq=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],     
     eoffset=0.0,
@@ -100,7 +250,7 @@ fit = processor.remv_alence_prof(
     initial_scale=1.0,
     initial_shift=0.0,
     fit_start=None,
-    make_plots=True,
+    make_plots=False,
     wait_for_input=True,
     update_valence=True,
     interp_kind="linear",
@@ -117,7 +267,9 @@ result = processor.averageqs(
 )
 
 processor.plotsqwav(
-    emin=20,
-    emax=250,
+    emin=140,
+    emax=200,
     show_error=True,
+    savepath="/home/hushiqi/work/xrs_ana/pictemp/sqw.png",
+
 )
