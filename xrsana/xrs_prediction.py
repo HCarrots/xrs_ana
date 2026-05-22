@@ -47,8 +47,8 @@ import h5py
 import numpy as np
 import pylab
 
-from . import xrs_pubilc
-from scipy import constants, optimize
+from . import xrs_public
+from scipy import constants
 
 installation_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -61,7 +61,9 @@ class detector:
     for the ESRF MAXIPIX detector.
     """
 
-    def __init__(self, energy=9.68, thickness=500, material='Si', pixel_size=[256,768]):
+    def __init__(self, energy=9.68, thickness=500, material='Si', pixel_size=None):
+        if pixel_size is None:
+            pixel_size = [256, 768]
         self.energy     = np.array(energy)    # analyzer energy [keV]
         self.thickness  = np.array(thickness) # thickness of the active material [microns]
         self.material   = material            # detector active material
@@ -111,17 +113,17 @@ class detector:
             energy = self.energy
         thickness = self.thickness*1e-4 # conversion to cm (needed for mpr routine)
         material  = self.material
-        murho,rhov,mv = xrs_pubilc.mpr(energy,material)
-        return 1.0 - np.exp(-thickness*murho)
+        murhoe, rhov, ahv, rhoe, mv = xrs_public.mpr(energy,material)
+        return 1.0 - np.exp(-thickness*murhoe)
 
 class analyzer:
     """
     Class to describe things related to the analyzer crystal used. Default values are for a Si(660) crystal.
     """
     
-    def __init__(self,material='Si', hkl=[6,6,0], mask_d=60.0, bend_r=1.0, energy_resolution = 0.5, diced=False, thickness=500.0, database_dir=installation_dir):
+    def __init__(self,material='Si', hkl=None, mask_d=60.0, bend_r=1.0, energy_resolution = 0.5, diced=False, thickness=500.0, database_dir=installation_dir):
         self.material     = material               # analyzer material
-        self.hkl          = np.array(hkl)          # [hkl] indices of reflection used (shape (3,) numpy array)
+        self.hkl          = np.array(hkl if hkl is not None else [6,6,0])          # [hkl] indices of reflection used (shape (3,) numpy array)
         self.mask_d       = mask_d                 # analyzer mask diameter in [mm]
         self.bend_r       = bend_r                 # bending radius of the crystal [mm]
         self.diced        = diced                  # boolean (True or False) if a diced crystal is used or not (defalt is False)
@@ -236,21 +238,13 @@ class analyzer:
             finally:
                 database.close()
         except (FileNotFoundError, OSError, KeyError):
-            # if no file exists, calculate reflectivity from scratch
-            #print ('>>>>>>>>>>>>>>>', energy, hkl, material, bend_r, dev, alpha)
-            reflectivity, e_scale, dev, e0 = xrs_pubilc.taupgen(energy,hkl,material, bend_r,dev,alpha)
-            self.reflectivity     = reflectivity
-            self.deviation_meV    = e_scale
-            self.deviation_arcsec = dev
-            self.energy_of_refl_calculation = e0
-            # save reflectivity for next time use
-            # filename = self.database_dir +  material + '_'  + 'hkl' + str(hkl) + '_'+ str(energy) + 'keV' + '.dat'
-            filename =   material + '_'  + 'hkl' + str(hkl) + '_'+ str(energy) + 'keV' + '.dat'
-            # database =   shelve.open(filename)
-            # database['reflectivity']     = reflectivity
-            # database['deviation_meV']    = e_scale
-            # database['deviation_arcsec'] = dev
-            # database['energy_of_refl_calculation'] = e0
+            result = xrs_public.taupgen(energy,hkl,material, bend_r,dev,alpha)
+            if result is not None:
+                reflectivity, e_scale, dev_out, e0 = result
+                self.reflectivity     = reflectivity
+                self.deviation_meV    = e_scale
+                self.deviation_arcsec = dev_out
+                self.energy_of_refl_calculation = e0
 
     def plot_reflectivity(self,mode='energy'):
         """
@@ -287,16 +281,20 @@ class analyzer:
         The efficiency is calculated by averaging over the energy resolution set upon class initialization.
         energy = energy (in [keV]) for wich the efficiency is to be calculated
         """
-        if not energy:
+        if energy is None:
             energy = self.energy_of_refl_calculation
         # print type(energy)
         energy_resolution = self.energy_resolution * 1.0e3 # resolution in meV
-        if not np.any(self.reflectivity):
+        if len(self.reflectivity) == 0:
             self.get_reflectivity(energy)
         dev_energy      = self.deviation_meV
         reflectivity    = self.reflectivity
+        if len(reflectivity) == 0:
+            print('Could not calculate reflectivity. Using default efficiency 0.5.')
+            self.efficiency = 0.5
+            return self.efficiency
         # average over the FWHM of the reflectivity curve for an estimate of the efficiency
-        fwhm, x0 = xrs_pubilc.fwhm(dev_energy,reflectivity)
+        fwhm, x0 = xrs_public.fwhm(dev_energy,reflectivity)
         inds            = np.where(np.logical_and(dev_energy>=x0-fwhm/2.0,dev_energy<=x0+fwhm/2.0))[0]
         self.efficiency = np.mean(reflectivity[inds])
         self.energy_resolution_meV = energy_resolution
@@ -372,10 +370,10 @@ class sample:
         rho_formu      = self.get_densities()
 
         if energy2 is not None:
-            return xrs_pubilc.mpr_compds(energy,formulas,concentrations,E0,rho_formu) # returns mu_in and mu_out
+            return xrs_public.mpr_compds(energy,formulas,concentrations,E0,rho_formu) # returns mu_in and mu_out
         else:
             E0 = np.atleast_1d(energy)[-1]
-            mu_tot_in, mu_tot_out = xrs_pubilc.mpr_compds(energy,formulas,concentrations,E0,rho_formu)
+            mu_tot_in, mu_tot_out = xrs_public.mpr_compds(energy,formulas,concentrations,E0,rho_formu)
             return mu_tot_in # returns only mu_in
 
     def get_absorption_correction(self,energy1,energy2,thickness=None):
@@ -393,24 +391,21 @@ class sample:
 
         mu_tot_in, mu_tot_out = self.get_murho(energy1,energy2)
 
-        if isinstance(tth,list):
+        if self.shape == 'sphere':
             ac = (mu_tot_in + mu_tot_out)/(1.0 - np.exp(-mu_tot_in*thickness -mu_tot_out*thickness))
-
+        elif self.shape == 'slab' and alpha and beta:
+            if isinstance(tth, list):
+                raise ValueError('Slab geometry with multiple scattering angles is not supported.')
+            if tth:
+                if self.beta<0: # transmission geometry
+                    test_tth = alpha-beta
+                else: # reflection geometry
+                    test_tth = 180.0 - (alpha+beta)
+                if tth != test_tth:
+                    print( 'the alpha and beta values set are not congruent to the tth value set!')
+            ac = xrs_public.abscorr2(mu_tot_in,mu_tot_out,alpha,beta,thickness)
         else:
-            if self.shape == 'slab' and alpha and beta:
-                if tth:
-                    if self.beta<0: # transmission geometry
-                        test_tth = alpha-beta
-                    else: # reflection geometry
-                        test_tth = 180.0 - (alpha+beta)
-                    if tth != test_tth:
-                        print( 'the alpha and beta values set are not congruent to the tth value set!')
-                ac = xrs_pubilc.abscorr2(mu_tot_in,mu_tot_out,alpha,beta,thickness)
-            elif self.shape == 'sphere':
-                ac = (mu_tot_in + mu_tot_out)/(1.0 - np.exp(-mu_tot_in*thickness -mu_tot_out*thickness)) 
-                #1.0/np.exp(-thickness*mu_tot_in -thickness*mu_tot_out) # spherical sample just add up in and outgoing absorption
-            else:
-                raise ValueError('please provide either shape=\'sphere\' (default) or \'slab\' and alpha and beta')
+            raise ValueError('please provide either shape=\'sphere\' (default) or \'slab\' and alpha and beta')
         return ac
 
     def plot_inv_absorption(self,energy1,energy2,range_of_thickness = np.arange(0.0,0.5,0.01)):
@@ -489,7 +484,7 @@ class beam:
     def get_beam_height_cm(self):
         return self.beam_height * 1.0e-4
     def get_beam_width(self):
-        return self.beam_height
+        return self.beam_width
     def get_beam_width_cm(self):
         return self.beam_width * 1.0e-4
     def get_divergence(self):
@@ -513,7 +508,7 @@ class compton_profiles:
             for ii in range(len(self.densities)):
                 self.mean_density += self.densities[ii]*self.concentrations[ii]
         else:
-            self.mean_density = self.densities
+            self.mean_density = self.densities[0]
         self.E0             = E0          # elastic line energy in [keV]
         self.eloss_range    = eloss_range # desired energy loss range in [eV]
         self.sample_shape   = sample_obj.get_shape()
@@ -543,13 +538,13 @@ class compton_profiles:
     def calc_pure_HF_profiles(self):
         if isinstance(self.tth,list):
             for tth,ii in zip(self.tth,list(range(len(self.tth)))):
-                eloss,J,C,V,q = xrs_pubilc.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=tth)
+                eloss,J,C,V,q = xrs_public.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=tth)
                 self.J[:,ii] = np.interp(self.eloss_range,eloss,J)
                 self.C[:,ii] = np.interp(self.eloss_range,eloss,C)
                 self.V[:,ii] = np.interp(self.eloss_range,eloss,V)
                 self.q[:,ii] = np.interp(self.eloss_range,eloss,q)
         else:
-            eloss,J,C,V,q = xrs_pubilc.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=self.tth)
+            eloss,J,C,V,q = xrs_public.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=self.tth)
             self.J = np.interp(self.eloss_range,eloss,J)
             self.C = np.interp(self.eloss_range,eloss,C)
             self.V = np.interp(self.eloss_range,eloss,V)
@@ -557,26 +552,26 @@ class compton_profiles:
 
     def calc_HF_profiles(self):
         if isinstance(self.tth,list):
-            if not np.any(self.J) and not np.any(self.C) and not np.any(self.V) and not np.any(self.q):
+            if len(self.J) == 0:
                 self.calc_pure_HF_profiles()
             for tth,ii in zip(self.tth,list(range(len(self.tth)))):
                 self.J[:,ii] = self.J[:,ii]/self.ac_factor*self.mean_density
                 self.C[:,ii] = self.C[:,ii]/self.ac_factor*self.mean_density
                 self.V[:,ii] = self.V[:,ii]/self.ac_factor*self.mean_density
         else:
-            if not np.any(self.J) and not np.any(self.C) and not np.any(self.V) and not np.any(self.q):
+            if len(self.J) == 0:
                 self.calc_pure_HF_profiles() # calculate uncorrected profiles
             self.J = self.J/self.ac_factor*self.mean_density
             self.C = self.C/self.ac_factor*self.mean_density
             self.V = self.V/self.ac_factor*self.mean_density
 
     def get_HF_profiles(self):
-        if not np.any(self.J) and not np.any(self.C) and not np.any(self.V) and not np.any(self.q):
-            self.calc_HF_profiles() # calculate uncorrected profiles
+        if len(self.J) == 0:
+            self.calc_HF_profiles()
         return self.eloss_range, self.J, self.C, self.V, self.q
 
     def plot_HF_profile(self):
-        if not np.any(self.J) and not np.any(self.C) and not np.any(self.V) and not np.any(self.q):
+        if len(self.J) == 0:
             self.calc_HF_profiles()
         cla()
         pylab.plot(self.eloss_range,self.J)
@@ -636,7 +631,7 @@ class absolute_cross_section:
             self.absolute_counts = self.I0 * self.thomson[:,0] * self.J * self.ana_solid_angle * self.ana_energy_resolution *  num_of_scatterers * self.sample_thickness * self.sample_abs_in * self.ana_efficiency * self.det_efficiency
 
     def plot_abs_cross_section(self):
-        if not np.any(self.absolute_counts):
+        if len(self.absolute_counts) == 0:
             self.calc_abs_cross_section()
         cla()
         pylab.plot(self.eloss,self.absolute_counts)
@@ -645,7 +640,7 @@ class absolute_cross_section:
         pylab.show()
 
     def save_txt(self, file_name, header=''):
-        if not np.any(self.absolute_counts):
+        if len(self.absolute_counts) == 0:
             self.calc_abs_cross_section()
         absolute_counts = np.asarray(self.absolute_counts)
         if absolute_counts.ndim == 1:
@@ -669,19 +664,20 @@ class absolute_cross_section:
         """
         if isinstance(fname, h5py.Group):
             f=fname
+            opened = False
         else:
             f = h5py.File(fname, "w")
+            opened = True
 
         h5_group = f.require_group(group_name)
-        # absolute counts for plotting
         if( len(self.absolute_counts.shape)==1):
              self.absolute_counts = np.array([self.absolute_counts] ).T
         data = np.zeros((len(self.eloss),self.absolute_counts.shape[1]+1))
         data[:,0] = self.eloss
         data[:,1::] = self.absolute_counts
         h5_group["abs_counts"] = data
-        f.flush()
-        f.close()      
+        if opened:
+            f.close()
 
 def input_file_parser(filename):
     """
@@ -736,8 +732,8 @@ def _parse_input_assignment(line):
         return key, _parse_numpy_expression(value)
 
 
-def _parse_numpy_expression(value):
-    tree = ast.parse(value, mode='eval')
+def _parse_numpy_expression(expression):
+    tree = ast.parse(expression, mode='eval')
     allowed_calls = {
         ('np', 'arange'): np.arange,
         ('numpy', 'arange'): np.arange,
@@ -755,8 +751,8 @@ def _parse_numpy_expression(value):
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            value = convert(node.operand)
-            return value if isinstance(node.op, ast.UAdd) else -value
+            val = convert(node.operand)
+            return val if isinstance(node.op, ast.UAdd) else -val
         if isinstance(node, ast.List):
             return [convert(item) for item in node.elts]
         if isinstance(node, ast.Tuple):
@@ -764,11 +760,11 @@ def _parse_numpy_expression(value):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
             call_key = (node.func.value.id, node.func.attr)
             if call_key not in allowed_calls:
-                raise ValueError("Unsupported expression in prediction input: %s" % value)
+                raise ValueError("Unsupported expression in prediction input: %s" % expression)
             args = [convert(arg) for arg in node.args]
             kwargs = {keyword.arg: convert(keyword.value) for keyword in node.keywords}
             return allowed_calls[call_key](*args, **kwargs)
-        raise ValueError("Unsupported expression in prediction input: %s" % value)
+        raise ValueError("Unsupported expression in prediction input: %s" % expression)
 
     return convert(tree)
 
@@ -776,54 +772,11 @@ def get_all_input(filename = 'prediction.inp'):
     """
     Adds default values if input is missing in the input-file and a default value exists for the missing one.
     """
-    # parse the input file
     input_parameters, section_names = input_file_parser(filename)
-    # create something for all possible inputs
-    all_input = {}    
-    for name in section_names:
-        all_input[name] = {}
-    # detector
-    all_input['detector']['energy']    = 9.7  # analyzer energy in keV
-    all_input['detector']['thickness'] = 500.0 # detector thickness
-    all_input['detector']['material']  = 'Si'  # detector material
-    all_input['detector']['pixel_size']= [256,768] #detector pixel size
-    # analyzer
-    all_input['analyzer']['material'] = 'Si' # analyzer crystal material 
-    all_input['analyzer']['hkl']      = [6,6,0] # analyzer crystal reflection
-    all_input['analyzer']['mask_d']   = 60.0    # analyzer mask diameter in mm
-    all_input['analyzer']['bend_r']   = 1.0     # analyzer bending radius in m
-    all_input['analyzer']['energy_resolution']   = 0.5 # resolution in eV
-    all_input['analyzer']['diced']        = False    # keyword, if bent or diced analyzer is used
-    all_input['analyzer']['thickness']    = 500.0    # analyzer bending radius in m
-    all_input['analyzer']['database_dir'] = installation_dir  # directory to tabulated chi tables (for calculation of reflectivities)
-    # sample
-    all_input['sample']['chem_formulas']    = []
-    all_input['sample']['concentrations']   = []
-    all_input['sample']['densities']        = []
-    all_input['sample']['angle_tth']        = []
-    all_input['sample']['sample_thickness'] = []
-    all_input['sample']['angle_in'] = None    # up to now, only spherical samples possible !!!
-    all_input['sample']['angle_out'] = None   # same here
-    all_input['sample']['shape'] = 'sphere'    # sample shape, right now, only this works, should be 'slab' or 'sphere' in the future
-    all_input['sample']['molar_masses'] = None # this is needed for the estimation of number of scatterers. should be mandatory, acutally
-    # thomson
-    all_input['thomson']['omega_1'] = []
-    all_input['thomson']['omega_2'] = [] 
-    all_input['thomson']['tth']     = []
-    all_input['thomson']['scattering_plane'] = 'vertical' # 'vertical' or 'horizontal', for polarization purposes
-    all_input['thomson']['polarization'] = 0.99           # polarization factor
-    # beam
-    all_input['beam']['i0_intensity'] = []
-    all_input['beam']['beam_height']  = []
-    all_input['beam']['beam_width']   = []
-    all_input['beam']['divergence'] = None # this is just a dummy parameter
-    # compton_profiles
-    all_input['compton_profiles']['eloss_range'] = np.arange(0.0,1000.0,0.1) # energy range in eV
-    all_input['compton_profiles']['E0'] = 9.7 # analyzer energy in keV
-    # if present, replace all_input variable by values provided in the input file:
+    all_input = _default_all_input()
     for key in input_parameters:
         for key2 in input_parameters[key]:
-            all_input[key][key2] =  input_parameters[key][key2]
+            all_input[key][key2] = input_parameters[key][key2]
     return all_input
 
 
@@ -936,6 +889,8 @@ def _format_web_value(value):
 
 def _number_list(value, default=None, item_type=float):
     if value is None or value == '':
+        if default is None:
+            return []
         value = default
     value = _parse_literal_value(value)
     if value is None:
@@ -952,6 +907,8 @@ def _number_list(value, default=None, item_type=float):
 
 def _string_list(value, default=None):
     if value is None or value == '':
+        if default is None:
+            return []
         value = default
     value = _parse_literal_value(value)
     if value is None:
@@ -1888,7 +1845,21 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
 """
 
 
+def _validate_web_payload(payload):
+    if not isinstance(payload, dict):
+        raise ValueError('Payload must be a JSON object.')
+    points = payload.get('points')
+    if points is not None and (not isinstance(points, (int, float)) or int(points) < 1):
+        raise ValueError('points must be a positive integer.')
+    for field in ('eloss_min', 'eloss_max'):
+        val = payload.get(field)
+        if val is not None and not isinstance(val, (int, float)):
+            raise ValueError('%s must be numeric.' % field)
+
+
 class PredictionRequestHandler(BaseHTTPRequestHandler):
+    MAX_BODY = 1 << 20  # 1 MiB
+
     def _send_json(self, payload, status=200):
         body = json.dumps(payload).encode('utf-8')
         self.send_response(status)
@@ -1919,9 +1890,13 @@ class PredictionRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             length = int(self.headers.get('Content-Length', '0'))
+            if length > self.MAX_BODY:
+                self._send_json({'error': 'Request body too large.'}, status=413)
+                return
             raw_body = self.rfile.read(length) if length else b'{}'
             payload = json.loads(raw_body.decode('utf-8'))
             if path == '/api/predict':
+                _validate_web_payload(payload)
                 self._send_json(predict_from_parameters(payload))
             elif path == '/api/import-inp':
                 self._send_json({'parameters': web_parameters_from_inp_text(payload.get('text', ''))})

@@ -1,6 +1,6 @@
 import numpy as np
 import copy
-from xrsana.xrs_pubilc import e2pz,mpr_compds,abscorr2,element,convg,pz2e1
+from xrsana.xrs_public import e2pz,mpr_compds,abscorr2,element,convg,pz2e1
 from xrsana import xrs_ComptonProfiles
 import os
 from scipy import interpolate , optimize

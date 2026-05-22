@@ -5,9 +5,9 @@ from re import findall
 import os
 import numbers
 from functools import lru_cache
-from scipy import interpolate ,optimize,integrate
+from scipy import interpolate ,optimize
+from scipy.integrate import trapezoid
 from scipy.integrate import odeint
-from xrs_fileIO import readbiggsdata
 data_installation_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),"resources",  'data')
 
 def element(z):
@@ -964,7 +964,7 @@ def makeprofile(element,filename=os.path.join(data_installation_dir,'ComptonProf
     enscaleh = enscale/hartree # eloss in a.u.
     # normalize to one then multiply by N_el*q**2/2
     for n in range(len(binden)):
-        hfprofile[:,n+1] = hfprofile[:,n+1]/(integrate.trapz(np.multiply(hfprofile[:,n+1],enscaleh),enscaleh))
+        hfprofile[:,n+1] = hfprofile[:,n+1]/(trapezoid(np.multiply(hfprofile[:,n+1],enscaleh),enscaleh))
         hfprofile[:,n+1] = np.multiply(hfprofile[:,n+1],(q**2.0)/2.0)*occ[n]
     # convert back to [1/eV] and sum up
     # total profile J and valence V (all edges )
@@ -1011,7 +1011,7 @@ def makepzprofile(element,filename=os.path.join(data_installation_dir,'ComptonPr
         pzprofile[:,n+1] = interpolate.splev(abs(pzscale),intf,der=0)
     # normalize to one electron, multiply by number of electrons
     for n in range(len(binden)):
-        normval = integrate.trapz(pzprofile[:,n+1],pzprofile[:,0])
+        normval = trapezoid(pzprofile[:,n+1],pzprofile[:,0])
         pzprofile[:,n+1] = pzprofile[:,n+1]/normval*int(occupation[n])
     binden     = [float(en) for en in binden]
     occupation = [float(val) for val in occupation]
@@ -1097,7 +1097,7 @@ def HRcorrect(pzprofile,occupation,q):
         if occupation[2] < 6:
             pass
         else:
-            forgamma = 3.0*pzprofile[:,3]/np.trapz(pzprofile[:,3],pzprofile[:,0]) # 2p correction is defined for 3 electrons in the 2p shell
+            forgamma = 3.0*pzprofile[:,3]/trapezoid(pzprofile[:,3],pzprofile[:,0]) # 2p correction is defined for 3 electrons in the 2p shell
             # find gamma2p
             fitfct = lambda a: (np.absolute(np.max(forgamma)-np.max(((a**2.0+20.0*pzprofile[:,0]**2.0)*64.0*a**7.0/5.0/np.pi/(a**2.0+4.0*pzprofile[:,0]**2.0)**5.0))))
             res = optimize.leastsq(fitfct,np.sum(occupation)*1.0/3.0)
@@ -1108,3 +1108,59 @@ def HRcorrect(pzprofile,occupation,q):
             j1 = j1/q*j0
             asymmetry[:,2] = j1
     return asymmetry
+
+
+def readbiggsdata(filename,element):
+    """
+    Reads Hartree-Fock Profile of element 'element' from values tabulated 
+    by Biggs et al. (Atomic Data and Nuclear Data Tables 16, 201-309 (1975))
+    as provided by the DABAX library (http://ftp.esrf.eu/pub/scisoft/xop2.3/DabaxFiles/ComptonProfiles.dat).
+    input:
+    filename = path to the ComptonProfiles.dat file (the file should be distributed with this package)
+    element  = string of element name
+    returns:
+
+      * data     = the data for the according element as in the file:
+          * #UD  Columns: 
+          * #UD  col1: pz in atomic units 
+          * #UD  col2: Total compton profile (sum over the atomic electrons
+          * #UD  col3,...coln: Compton profile for the individual sub-shells
+
+      * occupation = occupation number of the according shells
+      * bindingen  = binding energies of the accorting shells
+      * colnames   = strings of column names as used in the file
+    """
+    elementid = '#S'
+    sizeid    = '#N'
+    occid     = '#UOCCUP'
+    bindingid = '#UBIND'
+    colnameid = '#L'
+    data = []
+    f = open(filename,'r')
+    istrue = True
+    while istrue:
+        line = f.readline()
+        if line[0:2] == elementid:
+            if line.split()[-1] == element:
+                line = f.readline()
+                while line[0:2] != elementid:
+                    if line[0:2] == sizeid:
+                        arraysize = int(line.split()[-1])
+                        line = f.readline()
+                    if line[0:7] == occid:
+                        occupation = line.split()[1:]
+                        line = f.readline()
+                    if line[0:6] == bindingid:
+                        bindingen = line.split()[1:]    
+                        line = f.readline()
+                    if line[0:2] == colnameid:
+                        colnames = line.split()[1:]
+                        line = f.readline()
+                    if line[0]== ' ':
+                        data.append([float(n) for n in line.strip().split()])
+                        #data = np.zeros((31,arraysize))
+                        line = f.readline()
+                break
+    length = len(data)
+    data = (np.reshape(np.array(data),(length,arraysize)))
+    return data, occupation, bindingen, colnames
