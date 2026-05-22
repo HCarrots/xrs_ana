@@ -47,7 +47,7 @@ import h5py
 import numpy as np
 import pylab
 
-from . import xrs_utilities
+from . import xrs_pubilc
 from scipy import constants, optimize
 
 installation_dir = os.path.dirname(os.path.abspath(__file__))
@@ -111,7 +111,7 @@ class detector:
             energy = self.energy
         thickness = self.thickness*1e-4 # conversion to cm (needed for mpr routine)
         material  = self.material
-        murho,rhov,mv = xrs_utilities.mpr(energy,material)
+        murho,rhov,mv = xrs_pubilc.mpr(energy,material)
         return 1.0 - np.exp(-thickness*murho)
 
 class analyzer:
@@ -238,7 +238,7 @@ class analyzer:
         except (FileNotFoundError, OSError, KeyError):
             # if no file exists, calculate reflectivity from scratch
             #print ('>>>>>>>>>>>>>>>', energy, hkl, material, bend_r, dev, alpha)
-            reflectivity, e_scale, dev, e0 = xrs_utilities.taupgen(energy,hkl,material, bend_r,dev,alpha)
+            reflectivity, e_scale, dev, e0 = xrs_pubilc.taupgen(energy,hkl,material, bend_r,dev,alpha)
             self.reflectivity     = reflectivity
             self.deviation_meV    = e_scale
             self.deviation_arcsec = dev
@@ -296,7 +296,7 @@ class analyzer:
         dev_energy      = self.deviation_meV
         reflectivity    = self.reflectivity
         # average over the FWHM of the reflectivity curve for an estimate of the efficiency
-        fwhm, x0 = xrs_utilities.fwhm(dev_energy,reflectivity)
+        fwhm, x0 = xrs_pubilc.fwhm(dev_energy,reflectivity)
         inds            = np.where(np.logical_and(dev_energy>=x0-fwhm/2.0,dev_energy<=x0+fwhm/2.0))[0]
         self.efficiency = np.mean(reflectivity[inds])
         self.energy_resolution_meV = energy_resolution
@@ -372,10 +372,10 @@ class sample:
         rho_formu      = self.get_densities()
 
         if energy2 is not None:
-            return xrs_utilities.mpr_compds(energy,formulas,concentrations,E0,rho_formu) # returns mu_in and mu_out
+            return xrs_pubilc.mpr_compds(energy,formulas,concentrations,E0,rho_formu) # returns mu_in and mu_out
         else:
             E0 = np.atleast_1d(energy)[-1]
-            mu_tot_in, mu_tot_out = xrs_utilities.mpr_compds(energy,formulas,concentrations,E0,rho_formu)
+            mu_tot_in, mu_tot_out = xrs_pubilc.mpr_compds(energy,formulas,concentrations,E0,rho_formu)
             return mu_tot_in # returns only mu_in
 
     def get_absorption_correction(self,energy1,energy2,thickness=None):
@@ -405,7 +405,7 @@ class sample:
                         test_tth = 180.0 - (alpha+beta)
                     if tth != test_tth:
                         print( 'the alpha and beta values set are not congruent to the tth value set!')
-                ac = xrs_utilities.abscorr2(mu_tot_in,mu_tot_out,alpha,beta,thickness)
+                ac = xrs_pubilc.abscorr2(mu_tot_in,mu_tot_out,alpha,beta,thickness)
             elif self.shape == 'sphere':
                 ac = (mu_tot_in + mu_tot_out)/(1.0 - np.exp(-mu_tot_in*thickness -mu_tot_out*thickness)) 
                 #1.0/np.exp(-thickness*mu_tot_in -thickness*mu_tot_out) # spherical sample just add up in and outgoing absorption
@@ -543,13 +543,13 @@ class compton_profiles:
     def calc_pure_HF_profiles(self):
         if isinstance(self.tth,list):
             for tth,ii in zip(self.tth,list(range(len(self.tth)))):
-                eloss,J,C,V,q = xrs_utilities.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=tth)
+                eloss,J,C,V,q = xrs_pubilc.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=tth)
                 self.J[:,ii] = np.interp(self.eloss_range,eloss,J)
                 self.C[:,ii] = np.interp(self.eloss_range,eloss,C)
                 self.V[:,ii] = np.interp(self.eloss_range,eloss,V)
                 self.q[:,ii] = np.interp(self.eloss_range,eloss,q)
         else:
-            eloss,J,C,V,q = xrs_utilities.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=self.tth)
+            eloss,J,C,V,q = xrs_pubilc.makeprofile_compds(self.chem_formulas,concentrations=self.concentrations,E0=self.E0,tth=self.tth)
             self.J = np.interp(self.eloss_range,eloss,J)
             self.C = np.interp(self.eloss_range,eloss,C)
             self.V = np.interp(self.eloss_range,eloss,V)

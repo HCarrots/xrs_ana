@@ -7,9 +7,6 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_HO_DATA_DIR = "/home/hushiqi/work/xrs_ana/ex_space/analysis/data/Ho"
-
-
 def print_citation_message():
     """Prints plea for citing the XRStools article when using this software."""
     print("                                                                                ")
@@ -43,7 +40,8 @@ class read_heps_id33:
 
     def __init__(
         self,
-        exp_dir=DEFAULT_HO_DATA_DIR,
+        #data_path
+        exp_dir=None,
         data_file=None,
         roi_file=None,
         info_file=None,
@@ -156,41 +154,6 @@ class read_heps_id33:
                 % (label, ", ".join(os.path.basename(path) for path in candidates))
             )
         raise FileNotFoundError("Could not find %s file matching %s in %s" % (label, pattern, directory))
-
-    def read_data(self):
-        self.header_attrs = self._read_info(self.info_file)
-        self.rois = self._read_table(self.roi_file)
-        self.dataframe = self._read_table(self.data_file)
-
-        energy_column = self._resolve_energy_column(self.dataframe)
-        selected_rois = self._select_rois(self.rois)
-        intensity_columns, selected_rois = self._resolve_intensity_columns(
-            self.dataframe,
-            selected_rois,
-            energy_column,
-        )
-
-        if not intensity_columns:
-            raise ValueError("No intensity columns were found in %s" % self.data_file)
-
-        self.intensity_columns_index = intensity_columns
-        self.selected_rois = selected_rois
-        self.eloss = self.dataframe[energy_column].to_numpy(dtype="float64")
-        self.signals = self.dataframe[intensity_columns].to_numpy(dtype="float64")
-        if self.signals.ndim == 1:
-            self.signals = self.signals[:, np.newaxis]
-        self.errors = np.sqrt(np.absolute(self.signals))
-
-        e0_values = self._selected_values(selected_rois, self.e0_column_index)
-        self.E0 = float(np.nanmean(e0_values) / 1e3) if e0_values.size else np.nan
-        self.cenom = (e0_values / 1e3).tolist() if e0_values.size else []
-        self.energy = self.E0 + self.eloss / 1e3 if np.isfinite(self.E0) else self.eloss / 1e3
-
-        self.q = self._q_values_for_columns(selected_rois, intensity_columns)
-        self.q_average = float(np.nanmean(self.q)) if self.q.size else np.nan
-        self.tth = self._make_tth(self.q, len(intensity_columns), self.E0)
-        self._update_analyzer_metadata(selected_rois, intensity_columns)
-        return self
 
     def _read_table(self, filename):
         dataframe = pd.read_csv(filename, sep="\t")
@@ -318,3 +281,38 @@ class read_heps_id33:
             fwhm = float(row["width"]) if row is not None and "width" in selected_rois else np.nan
             e0 = float(row[self.e0_column_index]) if row is not None and self.e0_column_index in selected_rois else np.nan
             self.cenom_dict[key] = {"average": {"fwhm": fwhm, "e0": e0}}
+    
+    def read_data(self):
+        self.header_attrs = self._read_info(self.info_file)
+        self.rois = self._read_table(self.roi_file)
+        self.dataframe = self._read_table(self.data_file)
+
+        energy_column = self._resolve_energy_column(self.dataframe)
+        selected_rois = self._select_rois(self.rois)
+        intensity_columns, selected_rois = self._resolve_intensity_columns(
+            self.dataframe,
+            selected_rois,
+            energy_column,
+        )
+
+        if not intensity_columns:
+            raise ValueError("No intensity columns were found in %s" % self.data_file)
+
+        self.intensity_columns_index = intensity_columns
+        self.selected_rois = selected_rois
+        self.eloss = self.dataframe[energy_column].to_numpy(dtype="float64")
+        self.signals = self.dataframe[intensity_columns].to_numpy(dtype="float64")
+        if self.signals.ndim == 1:
+            self.signals = self.signals[:, np.newaxis]
+        self.errors = np.sqrt(np.absolute(self.signals))
+
+        e0_values = self._selected_values(selected_rois, self.e0_column_index)
+        self.E0 = float(np.nanmean(e0_values) / 1e3) if e0_values.size else np.nan
+        self.cenom = (e0_values / 1e3).tolist() if e0_values.size else []
+        self.energy = self.E0 + self.eloss / 1e3 if np.isfinite(self.E0) else self.eloss / 1e3
+
+        self.q = self._q_values_for_columns(selected_rois, intensity_columns)
+        self.q_average = float(np.nanmean(self.q)) if self.q.size else np.nan
+        self.tth = self._make_tth(self.q, len(intensity_columns), self.E0)
+        self._update_analyzer_metadata(selected_rois, intensity_columns)
+        return self
