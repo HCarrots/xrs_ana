@@ -45,15 +45,15 @@ os.environ.setdefault('MPLCONFIGDIR', os.path.join('/tmp', 'xrsana-matplotlib'))
 
 import h5py
 import numpy as np
-import pylab
+import matplotlib.pyplot as plt
 
-from . import xrs_public
+from xrsana import xrs_public
 from scipy import constants
 
 installation_dir = os.path.dirname(os.path.abspath(__file__))
 
 def cla():
-    pylab.cla()
+    plt.cla()
 
 class detector:
     """
@@ -258,19 +258,19 @@ class analyzer:
         hkl          = self.get_hkl()
         E0           = self.energy_of_refl_calculation
         if mode == 'energy':
-            pylab.plot(dev_energy,reflectivity)
-            pylab.xlabel(['deviation from Bragg angle [meV]'])
-            pylab.ylabel(['reflectivity [arb. units]'])
+            plt.plot(dev_energy,reflectivity)
+            plt.xlabel(['deviation from Bragg angle [meV]'])
+            plt.ylabel(['reflectivity [arb. units]'])
             titlestring = 'Takagi-Taupin curve for the ' + str(hkl) + ' reflection at %.2f' %E0 + ' keV.'
-            pylab.title(titlestring)
-            pylab.show()
+            plt.title(titlestring)
+            plt.show()
         elif mode == 'angle':
-            pylab.plot(dev_arcsec,reflectivity)
-            pylab.xlabel(['deviation from Bragg angle [arcsec]'])
-            pylab.ylabel(['reflectivity [arb. units]'])
+            plt.plot(dev_arcsec,reflectivity)
+            plt.xlabel(['deviation from Bragg angle [arcsec]'])
+            plt.ylabel(['reflectivity [arb. units]'])
             titlestring = 'Takagi-Taupin curve for the ' + str(hkl) + ' reflection at %.2f' %E0 + ' keV.'
-            pylab.title(titlestring)
-            pylab.show()
+            plt.title(titlestring)
+            plt.show()
         else:
             print( 'mode unknown, please select either \'energy\' or \'angle\'.')
             return
@@ -422,10 +422,10 @@ class sample:
         for ii in range(len(ac_range)):
             ac_range[ii] = self.get_absorption_correction(energy1,energy2,range_of_thickness[ii])
         cla()
-        pylab.plot(range_of_thickness,1/ac_range)
-        pylab.xlabel('sample thickness [cm]')
-        pylab.ylabel('1/(absorption correction factor) [arb. units]')
-        pylab.show()
+        plt.plot(range_of_thickness,1/ac_range)
+        plt.xlabel('sample thickness [cm]')
+        plt.ylabel('1/(absorption correction factor) [arb. units]')
+        plt.show()
 
 class thomson:
     """
@@ -574,13 +574,13 @@ class compton_profiles:
         if len(self.J) == 0:
             self.calc_HF_profiles()
         cla()
-        pylab.plot(self.eloss_range,self.J)
-        pylab.plot(self.eloss_range,self.C)
-        pylab.plot(self.eloss_range,self.V)
-        pylab.xlabel('energy loss [eV]')
-        pylab.ylabel('intensity [1/eV]')
-        pylab.title('sample absorption corrected HF Compton profile')
-        pylab.show()
+        plt.plot(self.eloss_range,self.J)
+        plt.plot(self.eloss_range,self.C)
+        plt.plot(self.eloss_range,self.V)
+        plt.xlabel('energy loss [eV]')
+        plt.ylabel('intensity [1/eV]')
+        plt.title('sample absorption corrected HF Compton profile')
+        plt.show()
 
 class absolute_cross_section:
     """
@@ -634,10 +634,10 @@ class absolute_cross_section:
         if len(self.absolute_counts) == 0:
             self.calc_abs_cross_section()
         cla()
-        pylab.plot(self.eloss,self.absolute_counts)
-        pylab.xlabel('energy loss')
-        pylab.ylabel('absolute counts [1/sec]')
-        pylab.show()
+        plt.plot(self.eloss,self.absolute_counts)
+        plt.xlabel('energy loss')
+        plt.ylabel('absolute counts [1/sec]')
+        plt.show()
 
     def save_txt(self, file_name, header=''):
         if len(self.absolute_counts) == 0:
@@ -678,6 +678,8 @@ class absolute_cross_section:
         h5_group["abs_counts"] = data
         if opened:
             f.close()
+
+
 
 def input_file_parser(filename):
     """
@@ -767,6 +769,7 @@ def _parse_numpy_expression(expression):
         raise ValueError("Unsupported expression in prediction input: %s" % expression)
 
     return convert(tree)
+
 
 def get_all_input(filename = 'prediction.inp'):
     """
@@ -1234,6 +1237,89 @@ def save_prediction_txt(parameters=None, output_txt='prediction_output.txt'):
     return os.path.abspath(output_txt)
 
 
+def _inp_text_from_parameters(parameters=None):
+    params = dict(WEB_DEFAULT_PARAMETERS)
+    if parameters:
+        params.update(parameters)
+
+    formulas = _string_list(params.get('chem_formulas'), WEB_DEFAULT_PARAMETERS['chem_formulas'])
+    concentrations = _number_list(params.get('concentrations'), WEB_DEFAULT_PARAMETERS['concentrations'])
+    densities = _number_list(params.get('densities'), WEB_DEFAULT_PARAMETERS['densities'])
+    molar_masses = _number_list(params.get('molar_masses'), WEB_DEFAULT_PARAMETERS['molar_masses'])
+    concentrations, densities, molar_masses = _normalize_component_lengths(
+        formulas, concentrations, densities, molar_masses
+    )
+    tth = _number_list(params.get('angle_tth'), WEB_DEFAULT_PARAMETERS['angle_tth'])
+    eloss_min = _scalar(params.get('eloss_min'), WEB_DEFAULT_PARAMETERS['eloss_min'])
+    eloss_max = _scalar(params.get('eloss_max'), WEB_DEFAULT_PARAMETERS['eloss_max'])
+    points = max(20, min(2000, _scalar(params.get('points'), WEB_DEFAULT_PARAMETERS['points'], int)))
+    step = (eloss_max - eloss_min) / (points - 1) if points > 1 else 1.0
+
+    lines = []
+    lines.append('#### detector')
+    lines.append('energy = %s' % _scalar(params.get('detector_energy'), WEB_DEFAULT_PARAMETERS['detector_energy']))
+    lines.append('thickness = %s' % _scalar(params.get('detector_thickness'), WEB_DEFAULT_PARAMETERS['detector_thickness']))
+    lines.append("material = '%s'" % str(params.get('detector_material', WEB_DEFAULT_PARAMETERS['detector_material'])))
+    lines.append('pixel_size = [256, 768]')
+    lines.append('')
+
+    lines.append('#### analyzer')
+    lines.append("material = '%s'" % str(params.get('analyzer_material', WEB_DEFAULT_PARAMETERS['analyzer_material'])))
+    hkl = _number_list(params.get('hkl'), WEB_DEFAULT_PARAMETERS['hkl'], int)
+    lines.append('hkl = %s' % repr(list(hkl)))
+    lines.append('mask_d = %s' % _scalar(params.get('mask_d'), WEB_DEFAULT_PARAMETERS['mask_d']))
+    lines.append('bend_r = %s' % _scalar(params.get('bend_r'), WEB_DEFAULT_PARAMETERS['bend_r']))
+    lines.append('energy_resolution = %s' % _scalar(params.get('energy_resolution'), WEB_DEFAULT_PARAMETERS['energy_resolution']))
+    lines.append('diced = False')
+    lines.append('thickness = 500.0')
+    lines.append("database_dir = '%s'" % installation_dir)
+    lines.append('')
+
+    lines.append('#### sample')
+    lines.append('chem_formulas = %s' % repr(formulas))
+    lines.append('concentrations = %s' % (repr(concentrations[0]) if len(concentrations) == 1 else repr(concentrations)))
+    lines.append('densities = %s' % (repr(densities[0]) if len(densities) == 1 else repr(densities)))
+    lines.append('angle_tth = %s' % (repr(tth[0]) if len(tth) == 1 else repr(tth)))
+    lines.append('sample_thickness = %s' % _scalar(params.get('sample_thickness'), WEB_DEFAULT_PARAMETERS['sample_thickness']))
+    lines.append("shape = 'sphere'")
+    lines.append('molar_masses = %s' % (repr(molar_masses[0]) if len(molar_masses) == 1 else repr(molar_masses)))
+    lines.append('')
+
+    lines.append('#### thomson')
+    lines.append('tth = %s' % (repr(tth[0]) if len(tth) == 1 else repr(tth)))
+    lines.append("scattering_plane = '%s'" % str(params.get('scattering_plane', WEB_DEFAULT_PARAMETERS['scattering_plane'])))
+    lines.append('polarization = %s' % _scalar(params.get('polarization'), WEB_DEFAULT_PARAMETERS['polarization']))
+    lines.append('')
+
+    lines.append('#### beam')
+    lines.append('i0_intensity = %s' % _scalar(params.get('i0_intensity'), WEB_DEFAULT_PARAMETERS['i0_intensity']))
+    lines.append('beam_height = %s' % _scalar(params.get('beam_height'), WEB_DEFAULT_PARAMETERS['beam_height']))
+    lines.append('beam_width = %s' % _scalar(params.get('beam_width'), WEB_DEFAULT_PARAMETERS['beam_width']))
+    lines.append('')
+
+    lines.append('#### compton_profiles')
+    if points <= 1:
+        lines.append('eloss_range = np.linspace(%s, %s, 1)' % (eloss_min, eloss_max))
+    else:
+        lines.append('eloss_range = np.linspace(%s, %s, %s)' % (eloss_min, eloss_max, points))
+    lines.append('E0 = %s' % _scalar(params.get('E0'), WEB_DEFAULT_PARAMETERS['E0']))
+
+    return '\n'.join(lines) + '\n'
+
+
+def save_prediction_inp(parameters=None, output_inp='prediction.inp'):
+    if not output_inp:
+        raise ValueError('Output path is required.')
+    output_inp = os.path.expanduser(str(output_inp))
+    output_dir = os.path.dirname(os.path.abspath(output_inp))
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    text = _inp_text_from_parameters(parameters)
+    with open(output_inp, 'w') as handle:
+        handle.write(text)
+    return os.path.abspath(output_inp)
+
+
 PREDICTION_WEB_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -1271,10 +1357,12 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
       min-height: 100vh;
     }
     aside {
+      display: flex;
+      flex-direction: column;
       background: var(--panel);
       border-right: 1px solid var(--line);
-      padding: 18px;
-      overflow: auto;
+      padding: 18px 18px 0;
+      min-height: 0;
     }
     main {
       padding: 20px;
@@ -1288,14 +1376,18 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
     .subhead {
       color: var(--muted);
       font-size: 13px;
-      margin-bottom: 18px;
+      margin-bottom: 6px;
+    }
+    .status-bar {
+      flex: 0 0 auto;
+      padding: 6px 0 10px;
     }
     .section {
       border-top: 1px solid var(--line);
-      padding: 14px 0 4px;
+      padding: 8px 0 4px;
     }
     .section h2 {
-      margin: 0 0 10px;
+      margin: 0 0 6px;
       font-size: 13px;
       text-transform: uppercase;
       color: #405057;
@@ -1342,7 +1434,21 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
     .actions {
       display: flex;
       gap: 8px;
-      margin-top: 14px;
+    }
+    .actions-sticky {
+      flex: 0 0 auto;
+      padding: 12px 0;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      margin: 0 -18px;
+      padding: 12px 18px;
+    }
+    .sections-scroll {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      min-height: 0;
+      margin: 0 -18px;
+      padding: 0 18px;
     }
     button {
       border: 1px solid var(--accent);
@@ -1359,11 +1465,32 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
     }
     .status {
       min-height: 22px;
-      margin-top: 12px;
       font-size: 13px;
       color: var(--muted);
     }
-    .status.error { color: #b42318; }
+    .status.error {
+      color: #b42318;
+      background: #fef2f2;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #fecaca;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .section-header h2 { flex: 1; margin: 0; }
+    .section-header:hover h2 { color: var(--accent); }
+    .section-header .arrow {
+      transition: transform 0.2s;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .section-header .arrow.open { transform: rotate(90deg); }
+    .section-body.collapsed { display: none; }
     .chart-area {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -1501,77 +1628,116 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
       <aside>
         <h1>XRS Prediction</h1>
         <div class="subhead">Vue parameter platform</div>
+        <div class="status-bar status" :class="{ error: error }">{{ error || status }}</div>
 
-        <div class="section">
-          <h2>Files</h2>
-          <div class="grid">
-            <label class="wide">Import .inp<input type="file" accept=".inp,.txt" @change="importInp"></label>
-            <label class="wide">Output TXT path<input v-model="savePath"></label>
+        <div class="sections-scroll">
+          <div class="section">
+            <div class="section-header" @click="toggleSection('files')">
+              <h2>Files</h2>
+              <span class="arrow" :class="{ open: sectionsExpanded.files }">&#9654;</span>
+            </div>
+            <div class="section-body" :class="{ collapsed: !sectionsExpanded.files }">
+              <div class="grid">
+                <label class="wide">Import .inp<input type="file" accept=".inp,.txt" @change="importInp"></label>
+                <label class="wide">Output TXT path<input v-model="savePath"></label>
+                <label class="wide">Output INP path<input v-model="inpPath"></label>
+              </div>
+              <div class="actions">
+                <button class="secondary" @click="downloadTxt">Download TXT</button>
+                <button class="secondary" @click="saveTxt">Save TXT on server</button>
+              </div>
+              <div class="actions" style="margin-top: 6px">
+                <button class="secondary" @click="downloadInp">Download INP</button>
+                <button class="secondary" @click="saveInp">Save INP on server</button>
+              </div>
+            </div>
           </div>
+
+          <div class="section">
+            <div class="section-header" @click="toggleSection('sample')">
+              <h2>Sample</h2>
+              <span class="arrow" :class="{ open: sectionsExpanded.sample }">&#9654;</span>
+            </div>
+            <div class="section-body" :class="{ collapsed: !sectionsExpanded.sample }">
+              <div class="grid">
+                <label class="wide">Formula(s)<input v-model="form.chem_formulas"></label>
+                <label>Concentration<input v-model="form.concentrations"></label>
+                <label>Density g/cm3<input v-model="form.densities"></label>
+                <label>Molar mass<input v-model="form.molar_masses"></label>
+                <label>Thickness cm<input type="number" step="0.001" v-model.number="form.sample_thickness"></label>
+                <label>2 theta deg<input type="number" step="0.1" v-model.number="form.angle_tth"></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-header" @click="toggleSection('energy')">
+              <h2>Energy</h2>
+              <span class="arrow" :class="{ open: sectionsExpanded.energy }">&#9654;</span>
+            </div>
+            <div class="section-body" :class="{ collapsed: !sectionsExpanded.energy }">
+              <div class="grid">
+                <label>E0 keV<input type="number" step="0.01" v-model.number="form.E0"></label>
+                <label>Points<input type="number" min="20" max="2000" step="10" v-model.number="form.points"></label>
+                <label>Loss min eV<input type="number" step="1" v-model.number="form.eloss_min"></label>
+                <label>Loss max eV<input type="number" step="1" v-model.number="form.eloss_max"></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-header" @click="toggleSection('beam')">
+              <h2>Beam</h2>
+              <span class="arrow" :class="{ open: sectionsExpanded.beam }">&#9654;</span>
+            </div>
+            <div class="section-body" :class="{ collapsed: !sectionsExpanded.beam }">
+              <div class="grid">
+                <label class="wide">I0 photons/sec<input type="number" step="10000000000" v-model.number="form.i0_intensity"></label>
+                <label>Height micron<input type="number" step="1" v-model.number="form.beam_height"></label>
+                <label>Width micron<input type="number" step="1" v-model.number="form.beam_width"></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-header" @click="toggleSection('analyzer')">
+              <h2>Analyzer</h2>
+              <span class="arrow" :class="{ open: sectionsExpanded.analyzer }">&#9654;</span>
+            </div>
+            <div class="section-body" :class="{ collapsed: !sectionsExpanded.analyzer }">
+              <div class="grid">
+                <label>Material<input v-model="form.analyzer_material"></label>
+                <label>HKL<input v-model="form.hkl"></label>
+                <label>Mask mm<input type="number" step="1" v-model.number="form.mask_d"></label>
+                <label>Bend radius m<input type="number" step="0.1" v-model.number="form.bend_r"></label>
+                <label>Resolution eV<input type="number" step="0.01" v-model.number="form.energy_resolution"></label>
+                <label>Efficiency<input type="number" step="0.01" min="0" max="1" v-model.number="form.analyzer_efficiency"></label>
+                <label class="toggle wide">Calculate reflectivity<input type="checkbox" v-model="form.use_reflectivity"></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-header" @click="toggleSection('detector')">
+              <h2>Detector</h2>
+              <span class="arrow" :class="{ open: sectionsExpanded.detector }">&#9654;</span>
+            </div>
+            <div class="section-body" :class="{ collapsed: !sectionsExpanded.detector }">
+              <div class="grid">
+                <label>Material<input v-model="form.detector_material"></label>
+                <label>Energy keV<input type="number" step="0.01" v-model.number="form.detector_energy"></label>
+                <label class="wide">Thickness micron<input type="number" step="10" v-model.number="form.detector_thickness"></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions-sticky">
           <div class="actions">
-            <button class="secondary" @click="downloadTxt">Download TXT</button>
-            <button class="secondary" @click="saveTxt">Save on server</button>
+            <button @click="predict">Run</button>
+            <button class="secondary" @click="reset">Reset</button>
           </div>
         </div>
-
-        <div class="section">
-          <h2>Sample</h2>
-          <div class="grid">
-            <label class="wide">Formula(s)<input v-model="form.chem_formulas"></label>
-            <label>Concentration<input v-model="form.concentrations"></label>
-            <label>Density g/cm3<input v-model="form.densities"></label>
-            <label>Molar mass<input v-model="form.molar_masses"></label>
-            <label>Thickness cm<input type="number" step="0.001" v-model.number="form.sample_thickness"></label>
-            <label>2 theta deg<input type="number" step="0.1" v-model.number="form.angle_tth"></label>
-          </div>
-        </div>
-
-        <div class="section">
-          <h2>Energy</h2>
-          <div class="grid">
-            <label>E0 keV<input type="number" step="0.01" v-model.number="form.E0"></label>
-            <label>Points<input type="number" min="20" max="2000" step="10" v-model.number="form.points"></label>
-            <label>Loss min eV<input type="number" step="1" v-model.number="form.eloss_min"></label>
-            <label>Loss max eV<input type="number" step="1" v-model.number="form.eloss_max"></label>
-          </div>
-        </div>
-
-        <div class="section">
-          <h2>Beam</h2>
-          <div class="grid">
-            <label class="wide">I0 photons/sec<input type="number" step="10000000000" v-model.number="form.i0_intensity"></label>
-            <label>Height micron<input type="number" step="1" v-model.number="form.beam_height"></label>
-            <label>Width micron<input type="number" step="1" v-model.number="form.beam_width"></label>
-          </div>
-        </div>
-
-        <div class="section">
-          <h2>Analyzer</h2>
-          <div class="grid">
-            <label>Material<input v-model="form.analyzer_material"></label>
-            <label>HKL<input v-model="form.hkl"></label>
-            <label>Mask mm<input type="number" step="1" v-model.number="form.mask_d"></label>
-            <label>Bend radius m<input type="number" step="0.1" v-model.number="form.bend_r"></label>
-            <label>Resolution eV<input type="number" step="0.01" v-model.number="form.energy_resolution"></label>
-            <label>Efficiency<input type="number" step="0.01" min="0" max="1" v-model.number="form.analyzer_efficiency"></label>
-            <label class="toggle wide">Calculate reflectivity<input type="checkbox" v-model="form.use_reflectivity"></label>
-          </div>
-        </div>
-
-        <div class="section">
-          <h2>Detector</h2>
-          <div class="grid">
-            <label>Material<input v-model="form.detector_material"></label>
-            <label>Energy keV<input type="number" step="0.01" v-model.number="form.detector_energy"></label>
-            <label class="wide">Thickness micron<input type="number" step="10" v-model.number="form.detector_thickness"></label>
-          </div>
-        </div>
-
-        <div class="actions">
-          <button @click="predict">Run</button>
-          <button class="secondary" @click="reset">Reset</button>
-        </div>
-        <div class="status" :class="{ error: error }">{{ error || status }}</div>
       </aside>
 
       <main>
@@ -1639,13 +1805,22 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
         return {
           form: { ...defaults },
           savePath: defaults.output_txt || 'prediction_output.txt',
+          inpPath: 'prediction.inp',
           result: null,
           status: 'Ready',
           error: '',
           timer: null,
           requestId: 0,
           colors: ['#0f766e', '#b45309', '#2563eb', '#be123c', '#6d28d9', '#15803d'],
-          pad: { l: 78, r: 24, t: 24, b: 48 }
+          pad: { l: 78, r: 24, t: 24, b: 48 },
+          sectionsExpanded: {
+            files: true,
+            sample: true,
+            energy: true,
+            beam: true,
+            analyzer: true,
+            detector: true
+          }
         };
       },
       computed: {
@@ -1782,6 +1957,7 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
         reset() {
           this.form = { ...defaults };
           this.savePath = defaults.output_txt || 'prediction_output.txt';
+          this.inpPath = 'prediction.inp';
         },
         async saveTxt() {
           this.status = 'Saving...';
@@ -1836,6 +2012,51 @@ PREDICTION_WEB_HTML = r"""<!doctype html>
             return number.toExponential(3);
           }
           return number.toLocaleString(undefined, { maximumSignificantDigits: 5 });
+        },
+        toggleSection(name) {
+          this.sectionsExpanded[name] = !this.sectionsExpanded[name];
+        },
+        async downloadInp() {
+          this.status = 'Preparing .inp...';
+          this.error = '';
+          try {
+            const response = await fetch('/api/export-inp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parameters: this.form })
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Export failed');
+            const blob = new Blob([payload.text], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = (this.inpPath || 'prediction.inp').split(/[\\/]/).pop() || 'prediction.inp';
+            document.body.appendChild(link);
+            link.click();
+            URL.revokeObjectURL(link.href);
+            link.remove();
+            this.status = `Prepared ${link.download}`;
+          } catch (error) {
+            this.error = error.message;
+            this.status = '';
+          }
+        },
+        async saveInp() {
+          this.status = 'Saving .inp...';
+          this.error = '';
+          try {
+            const response = await fetch('/api/save-inp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parameters: this.form, output_inp: this.inpPath })
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Save failed');
+            this.status = `Saved ${payload.path}`;
+          } catch (error) {
+            this.error = error.message;
+            this.status = '';
+          }
         }
       }
     }).mount('#app');
@@ -1904,6 +2125,13 @@ class PredictionRequestHandler(BaseHTTPRequestHandler):
                 output_path = payload.get('output_txt') or WEB_DEFAULT_PARAMETERS['output_txt']
                 saved_path = save_prediction_txt(payload.get('parameters', {}), output_path)
                 self._send_json({'path': saved_path})
+            elif path == '/api/save-inp':
+                output_path = payload.get('output_inp') or 'prediction.inp'
+                saved_path = save_prediction_inp(payload.get('parameters', {}), output_path)
+                self._send_json({'path': saved_path})
+            elif path == '/api/export-inp':
+                inp_text = _inp_text_from_parameters(payload.get('parameters', {}))
+                self._send_json({'text': inp_text})
             else:
                 self._send_json({'error': 'Not found'}, status=404)
         except Exception as exc:

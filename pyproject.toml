@@ -17,6 +17,8 @@ dependencies = [
 ]
 
 [project.scripts]
+xrsana = "xrsana.cli:main"
+xrsana-shell = "xrsana.__main__:main"
 xrsana-browse-data = "xrsana.data_browser:main"
 
 [tool.setuptools.packages.find]

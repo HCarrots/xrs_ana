@@ -37,11 +37,11 @@ __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 import os
 import copy
 import numpy as np
-from . import xrs_utilities, xrs_ComptonProfiles
+from xrsana import xrs_public, xrs_ComptonProfiles
 import matplotlib.pyplot as plt
 
 from scipy import interpolate, optimize
-from .math_functions import pearson7, pearson7_zeroback
+from xrsana.math_functions import pearson7, pearson7_zeroback
 
 installation_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources" )
 
@@ -232,7 +232,7 @@ def extract_valence_profile_noninteractive(
     on the common pz scale, mirroring the legacy interactive method.
     """
     col = _as_columns(source_col)[0]
-    pz = xrs_utilities.e2pz(edge_obj.eloss/1.0e3 + edge_obj.E0, edge_obj.E0, edge_obj.tth[col])[0]
+    pz = xrs_public.e2pz(edge_obj.eloss/1.0e3 + edge_obj.E0, edge_obj.E0, edge_obj.tth[col])[0]
     core = edge_obj._core_profile(element, edge, column=col, shift=hfcore_shift)
 
     if linranges is None:
@@ -314,7 +314,7 @@ def transfer_valence_profile(edge_obj, source_col, target_cols=None, smoothgval=
     newasym = np.zeros_like(edge_obj.signals)
 
     for col in columns:
-        newenergy = (xrs_utilities.pz2e1(edge_obj.E0, edge_obj.pzscale, edge_obj.tth[col]) - edge_obj.E0)*1.0e3
+        newenergy = (xrs_public.pz2e1(edge_obj.E0, edge_obj.pzscale, edge_obj.tth[col]) - edge_obj.E0)*1.0e3
         order = np.argsort(newenergy)
         fval = interpolate.interp1d(newenergy[order], edge_obj.valencepz[:, source][order], bounds_error=False, fill_value=0.0)
         fasym = interpolate.interp1d(newenergy[order], edge_obj.valasymmetrypz[:, source][order], bounds_error=False, fill_value=0.0)
@@ -326,7 +326,7 @@ def transfer_valence_profile(edge_obj, source_col, target_cols=None, smoothgval=
 
     if smoothgval > 0.0:
         for col in columns:
-            edge_obj.valence[:, col] = xrs_utilities.convg(edge_obj.eloss, newvalence[:, col], smoothgval) + newasym[:, col]
+            edge_obj.valence[:, col] = xrs_public.convg(edge_obj.eloss, newvalence[:, col], smoothgval) + newasym[:, col]
     else:
         edge_obj.valence[:, columns] = newvalence[:, columns] + newasym[:, columns]
     edge_obj.valasymmetry[:, columns] = newasym[:, columns]
@@ -393,7 +393,7 @@ class HF_dataset:
         # interpolate the core profiles for the desired elements
         for key in self.edges:
             for edge in self.edges[key]:
-                edge_keyword = xrs_ComptonProfiles.mapShellNames(edge,xrs_utilities.element(key))
+                edge_keyword = xrs_ComptonProfiles.mapShellNames(edge,xrs_public.element(key))
                 for formula in self.formulas:
                     if key in formula:
                         # cp core-edge profile
@@ -912,7 +912,7 @@ class edge_extraction:
         if np.isscalar(densities):
             densities = [densities]
 
-        mu_in, mu_out = xrs_utilities.mpr_compds(
+        mu_in, mu_out = xrs_public.mpr_compds(
             self.eloss/1.0e3 + self.E0,
             self.HF_dataset.formulas,
             self.HF_dataset.stoich_weights,
@@ -926,8 +926,8 @@ class edge_extraction:
             else:
                 beta = -abs(abs(alpha) - self.tth[col])
 
-            ac = xrs_utilities.abscorr2(mu_in, mu_out, alpha, beta, samthickness)
-            _pz, cf = xrs_utilities.e2pz(self.E0 + self.eloss/1.0e3, self.E0, self.tth[col])
+            ac = xrs_public.abscorr2(mu_in, mu_out, alpha, beta, samthickness)
+            _pz, cf = xrs_public.e2pz(self.E0 + self.eloss/1.0e3, self.E0, self.tth[col])
             correction = ac*cf
             self.signals[:,col] *= correction
             self.errors[:,col]  *= np.abs(correction)
@@ -1090,7 +1090,7 @@ class edge_extraction:
             )
             valdata = f(self.eloss)
             if convwidth > 0.0:
-                valdata = xrs_utilities.convg(self.eloss, valdata, convwidth)
+                valdata = xrs_public.convg(self.eloss, valdata, convwidth)
             subdata = self.signals[:,col] - valdata
 
             self.valence[:,col] = valdata
@@ -1116,7 +1116,7 @@ class edge_extraction:
         plt.cla()
         plt.ion()
         for col in columns:
-            pz_dmy = xrs_utilities.e2pz(self.eloss/1.0e3+self.E0, self.E0, self.tth[col])[0]
+            pz_dmy = xrs_public.e2pz(self.eloss/1.0e3+self.E0, self.E0, self.tth[col])[0]
             
             core = self._core_profile(element, edge, column=col)
 
@@ -1207,7 +1207,7 @@ class edge_extraction:
         newasym = np.zeros_like(self.signals)
         plt.ion()
         for col in range(len(self.tth)):
-            newenergy = (xrs_utilities.pz2e1(self.E0, self.pzscale, self.tth[col]) - self.E0)*1.0e3
+            newenergy = (xrs_public.pz2e1(self.E0, self.pzscale, self.tth[col]) - self.E0)*1.0e3
             order = np.argsort(newenergy)
             f = interpolate.interp1d(newenergy[order], self.valencepz[:,source][order], bounds_error=False, fill_value=0.0)
             raw_valence = f(self.eloss)
@@ -1227,7 +1227,7 @@ class edge_extraction:
 
         if smoothgval > 0.0:
             for col in range(len(self.tth)):
-                self.valence[:,col] = xrs_utilities.convg(self.eloss,newvalence[:,col],smoothgval) + newasym[:,col]
+                self.valence[:,col] = xrs_public.convg(self.eloss,newvalence[:,col],smoothgval) + newasym[:,col]
             self.valasymmetry = newasym
         else:
             self.valence = newvalence + newasym

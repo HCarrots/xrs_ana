@@ -35,7 +35,7 @@ __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 
 import numpy as np
-from . import xrs_utilities
+from xrsana import xrs_public
 from . import xrs_fileIO
 
 from scipy import interpolate, integrate, constants, optimize
@@ -74,12 +74,12 @@ def parseChemFormula(ChemFormula):
 def getAtomicWeight(Z):
     """Returns the atomic weight.
     """
-    return xrs_utilities.myprho(1.0,Z)[2]
+    return xrs_public.myprho(1.0,Z)[2]
 
 def getAtomicDensity(Z):
     """Returns the atomic density.
     """
-    return xrs_utilities.myprho(1.0,Z)[1]
+    return xrs_public.myprho(1.0,Z)[1]
 
 class AtomProfile:
     """
@@ -129,7 +129,7 @@ class AtomProfile:
     def __init__(self, element, filename, stoichiometry=1.0):
         self.filename  = filename
         self.element   = element
-        self.elementNr = xrs_utilities.element(element)
+        self.elementNr = xrs_public.element(element)
         self.CP_profile, self.edges, self.occupation_num, self.shells = PzProfile(element,filename) 
         self.eloss     = []
         self.C_total   = []
@@ -235,13 +235,13 @@ class AtomProfile:
         self.thickness = thickness # in [cm] now
 
         # get the mass absorption coefficients
-        mu_in   = xrs_utilities.mpr(self.eloss/1.0e3+self.E0,self.element)[0]
-        mu_out  = xrs_utilities.mpr(self.E0,self.element)[0]
+        mu_in   = xrs_public.mpr(self.eloss/1.0e3+self.E0,self.element)[0]
+        mu_out  = xrs_public.mpr(self.E0,self.element)[0]
 
         # calculate the absorption factor for several alpha values
         if isinstance(self.alpha,list) or isinstance(self.alpha,np.ndarray):
             for alpha,ii in zip(self.alpha,list(range(len(self.alpha)))):
-                abs_corr = xrs_utilities.absCorrection(mu_in,mu_out,alpha,self.beta,self.thickness,geometry=geometry)
+                abs_corr = xrs_public.absCorrection(mu_in,mu_out,alpha,self.beta,self.thickness,geometry=geometry)
                 # apply correction to all profiles
                 self.C_total[:,ii] /= abs_corr
                 self.J_total[:,ii] /= abs_corr
@@ -254,7 +254,7 @@ class AtomProfile:
         # calculate the absorption factor for several beta values
         elif isinstance(self.beta,list) or isinstance(self.beta,np.ndarray):
             for beta,ii in zip(self.beta,list(range(len(self.beta)))):
-                abs_corr = xrs_utilities.absCorrection(mu_in,mu_out,self.alpha,beta,self.thickness,geometry=geometry)
+                abs_corr = xrs_public.absCorrection(mu_in,mu_out,self.alpha,beta,self.thickness,geometry=geometry)
                 # apply correction to all profiles
                 self.C_total[:,ii] /= abs_corr
                 self.J_total[:,ii] /= abs_corr
@@ -267,7 +267,7 @@ class AtomProfile:
         # calculate the absorption factor for several sample thickness values
         elif isinstance(self.thickness,list) or isinstance(self.thickness,np.ndarray):
             for thick,ii in zip(self.thickness,list(range(len(self.thickness)))):
-                abs_corr = xrs_utilities.absCorrection(mu_in,mu_out,self.alpha,self.beta,thick,geometry=geometry)
+                abs_corr = xrs_public.absCorrection(mu_in,mu_out,self.alpha,self.beta,thick,geometry=geometry)
                 # apply correction to all profiles
                 self.C_total[:,ii] /= abs_corr
                 self.J_total[:,ii] /= abs_corr
@@ -279,7 +279,7 @@ class AtomProfile:
 
         # calculate the absorption factor for a single value
         else:
-            abs_corr = xrs_utilities.absCorrection(mu_in,mu_out,self.alpha,self.beta,self.thickness,geometry=geometry)
+            abs_corr = xrs_public.absCorrection(mu_in,mu_out,self.alpha,self.beta,self.thickness,geometry=geometry)
             # apply correction to all profiles
             self.C_total /= abs_corr
             self.J_total /= abs_corr
@@ -328,7 +328,7 @@ class FormulaProfile:
         self.filename  = filename
         self.formula   = formula
         self.elements, self.stoichiometries = parseChemFormula(formula)
-        self.element_Nrs = [xrs_utilities.element(element) for element in self.elements]
+        self.element_Nrs = [xrs_public.element(element) for element in self.elements]
         self.AtomProfiles = {}
         for element,stoichio in zip(self.elements,self.stoichiometries):
             CP = AtomProfile(element,filename,stoichiometry=stoichio)
@@ -472,7 +472,7 @@ class ComptonProfiles:
     """
     def __init__(self, element):
         self.element   = element
-        self.elementNr = xrs_utilities.element(element)
+        self.elementNr = xrs_public.element(element)
         self.shells    = []
         self.edges     = []
         self.C         = []
@@ -570,10 +570,10 @@ def elossProfile(element,filename,E0,tth,correctasym=None,valence_cutoff=20.0):
     CP_profile, binding_energies, occupation_num, shell_names = PzProfile(element,filename)
 
     # convert pz to energy loss scale
-    enScale = ((np.flipud(xrs_utilities.pz2e1(E0,CP_profile[:,0],tth))-E0)*1.0e3)
+    enScale = ((np.flipud(xrs_public.pz2e1(E0,CP_profile[:,0],tth))-E0)*1.0e3)
 
     # define the momentum transfer
-    q = xrs_utilities.momtrans_au(enScale/1000.0 + E0, E0, tth)
+    q = xrs_public.momtrans_au(enScale/1000.0 + E0, E0, tth)
 
     # calculate asymmetry after Holm and Ribberfors for filles 1s and 2p shells
     # if correctasym == True

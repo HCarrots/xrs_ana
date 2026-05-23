@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Filename: xrs_utilities.py
+
 
 __author__ = "Christoph J. Sahle - ESRF"
 __contact__ = "christoph.sahle@esrf.fr"

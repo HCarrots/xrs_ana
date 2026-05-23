@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# -*- coding: utf-8 -*-
+# ============================================================================
+# XRSana launcher script
+# Configure environment variables, resolve resource/data paths,
+# and start the interactive Python CLI
+# ============================================================================
+set -euo pipefail
+
+# ── Project root directory (bin/xrsana → ../) ───────────────────────────────
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export XRSA_ROOT="${XRSA_ROOT:-$(cd "$_SCRIPT_DIR/.." && pwd)}"
+
+# ── Data and resource paths ─────────────────────────────────────────────────
+export XRSA_DATA="${XRSA_DATA:-${XRSA_ROOT}/ex_space}"
+export XRSA_RESOURCES="${XRSA_RESOURCES:-${XRSA_ROOT}/xrsana/resources/data}"
+
+# ── Matplotlib temporary directory
+# Avoid permission issues with ~/.matplotlib ─────────────────────────────────
+export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/xrsana-mpl}"
+
+# ── Matplotlib backend
+# Use Agg for headless/server environments if needed ─────────────────────────
+export MPLBACKEND="${MPLBACKEND:-TkAgg}"
+
+# ── Python module search path ───────────────────────────────────────────────
+export PYTHONPATH="${XRSA_ROOT}:${PYTHONPATH:-}"
+
+# ── Launch the XRSana CLI ───────────────────────────────────────────────────
+exec python "${XRSA_ROOT}/xrsana/cli.py" "$@"

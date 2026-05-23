@@ -1,5 +1,4 @@
 """Small web browser for reduced XRS crystal spectra."""
-
 from __future__ import annotations
 
 import argparse
@@ -352,7 +351,7 @@ def _format_number(value: float, digits: int) -> str:
     return f"{value:.{digits}f}"
 
 
-INDEX_HTML = """<!doctype html>
+INDEX_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
